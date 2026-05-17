@@ -6,6 +6,7 @@ package v8go
 
 // #include <stdlib.h>
 // #include "isolate.h"
+// #include "snapshot.h"
 import "C"
 
 import (
@@ -108,12 +109,16 @@ func NewIsolate(opts ...IsolateOption) *Isolate {
 	}
 
 	if len(config.snapshotBlob) > 0 {
+		// Route through the snapshot-aware constructor so the
+		// process-wide external_references array is wired in. The
+		// registry is frozen on first use.
 		cData := C.CBytes(config.snapshotBlob)
 		iso.snapshotData = cData
-		iso.ptr = C.NewIsolateWithSnapshot(
+		iso.ptr = C.v8go_NewIsolateWithSnapshotAndRefs(
 			cConstraints,
 			(*C.char)(cData),
 			C.int(len(config.snapshotBlob)),
+			frozenExtRefArray(),
 		)
 	} else {
 		iso.ptr = C.NewIsolate(cConstraints)

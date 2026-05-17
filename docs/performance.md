@@ -69,10 +69,25 @@ iso := v8.NewIsolate(v8.WithResourceConstraints(
 ))
 ```
 
-When the hard limit is reached, V8 calls `TerminateExecution`
-internally, causing `RunScript` to return an
+When the hard limit is reached, the built-in `NearHeapLimitCallback`
+calls `TerminateExecution`, causing `RunScript` to return an
 `ExecutionTerminated` error. The isolate remains usable after
 termination.
+
+For custom OOM handling, disable the built-in callback and install
+your own:
+
+```go
+iso := v8.NewIsolate(
+    v8.WithResourceConstraints(0, 50*1024*1024),
+    v8.WithoutDefaultHeapLimitCallback(),
+)
+iso.AddNearHeapLimitCallback(func(current, initial uint64) uint64 {
+    log.Printf("OOM: current=%d, initial=%d", current, initial)
+    iso.TerminateExecution()
+    return current * 2
+})
+```
 
 ### Heap statistics
 
@@ -229,7 +244,17 @@ For request-per-isolate architectures:
 
 For long-lived isolates (one isolate, many requests):
 
-1. Use `TerminateExecution` with timeouts to prevent runaway scripts.
+1. Use `TerminateExecution` or `RequestInterrupt` with timeouts to
+   prevent runaway scripts.
 2. Use `PerformMicrotaskCheckpoint` to drain the microtask queue
    between requests.
-3. Monitor `NumberOfDetachedContexts` for context leaks.
+3. Use `MemoryPressureNotification(Critical)` or `LowMemoryNotification`
+   to trigger aggressive GC when the host is under memory pressure.
+4. Use `CancelTerminateExecution` before recycling a terminated isolate.
+5. Use `SetIdle(true)` when no requests are being processed so V8 can
+   do incremental GC work.
+6. Install `AddGCPrologueCallback`/`AddGCEpilogueCallback` to monitor
+   GC pauses.
+7. Call `ContextDisposedNotification` after `ctx.Close()` to help V8
+   finalize context-specific resources.
+8. Monitor `NumberOfDetachedContexts` for context leaks.

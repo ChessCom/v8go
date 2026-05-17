@@ -1,4 +1,5 @@
 #include "object.h"
+#include "deps/include/v8-container.h"
 #include "deps/include/v8-object.h"
 #include "isolate-macros.h"
 #include "utils.h"
@@ -172,4 +173,75 @@ int ObjectDeleteAnyKey(ValuePtr ptr, ValuePtr key) {
 int ObjectDeleteIdx(ValuePtr ptr, uint32_t idx) {
   LOCAL_OBJECT(ptr);
   return obj->Delete(local_ctx, idx).ToChecked();
+}
+
+RtnValue ObjectGetPropertyNames(ValuePtr ptr) {
+  LOCAL_OBJECT(ptr);
+  RtnValue rtn = {};
+
+  Local<Array> result;
+  if (!obj->GetPropertyNames(local_ctx).ToLocal(&result)) {
+    rtn.error = ExceptionError(try_catch, iso, local_ctx);
+    return rtn;
+  }
+  m_value* new_val = new m_value;
+  new_val->id = 0;
+  new_val->iso = iso;
+  new_val->ctx = ctx;
+  new_val->ptr = Global<Value>(iso, result);
+
+  rtn.value = tracked_value(ctx, new_val);
+  return rtn;
+}
+
+RtnValue ObjectGetOwnPropertyNames(ValuePtr ptr) {
+  LOCAL_OBJECT(ptr);
+  RtnValue rtn = {};
+
+  Local<Array> result;
+  if (!obj->GetOwnPropertyNames(local_ctx).ToLocal(&result)) {
+    rtn.error = ExceptionError(try_catch, iso, local_ctx);
+    return rtn;
+  }
+  m_value* new_val = new m_value;
+  new_val->id = 0;
+  new_val->iso = iso;
+  new_val->ctx = ctx;
+  new_val->ptr = Global<Value>(iso, result);
+
+  rtn.value = tracked_value(ctx, new_val);
+  return rtn;
+}
+
+ValuePtr ObjectGetPrototype(ValuePtr ptr) {
+  LOCAL_OBJECT(ptr);
+
+  Local<Value> proto = obj->GetPrototypeV2();
+  m_value* new_val = new m_value;
+  new_val->id = 0;
+  new_val->iso = iso;
+  new_val->ctx = ctx;
+  new_val->ptr = Global<Value>(iso, proto);
+
+  return tracked_value(ctx, new_val);
+}
+
+RtnValue ObjectSetPrototype(ValuePtr ptr, ValuePtr proto_ptr) {
+  LOCAL_OBJECT(ptr);
+  RtnValue rtn = {};
+
+  Local<Value> proto_val = proto_ptr->ptr.Get(iso);
+  Maybe<bool> result = obj->SetPrototypeV2(local_ctx, proto_val);
+  if (result.IsNothing()) {
+    rtn.error = ExceptionError(try_catch, iso, local_ctx);
+    return rtn;
+  }
+
+  m_value* new_val = new m_value;
+  new_val->id = 0;
+  new_val->iso = iso;
+  new_val->ctx = ctx;
+  new_val->ptr = Global<Value>(iso, Undefined(iso));
+  rtn.value = tracked_value(ctx, new_val);
+  return rtn;
 }

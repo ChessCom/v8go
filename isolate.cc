@@ -2,6 +2,7 @@
 #include "deps/include/v8-initialization.h"
 #include "deps/include/v8-locker.h"
 #include "deps/include/v8-platform.h"
+#include "deps/include/v8-callbacks.h"
 
 #include "context.h"
 #include "isolate.h"
@@ -41,12 +42,14 @@ size_t NearMemoryLimitCallback(void* data, size_t current_heap_limit, size_t ini
   return current_heap_limit * 2;
 }
 
-static void ConfigureIsolate(Isolate* iso) {
+static void ConfigureIsolate(Isolate* iso, bool add_heap_limit_cb) {
   iso->SetCaptureStackTraceForUncaughtExceptions(true);
-  iso->AddNearHeapLimitCallback(NearMemoryLimitCallback, iso);
+  if (add_heap_limit_cb) {
+    iso->AddNearHeapLimitCallback(NearMemoryLimitCallback, iso);
+  }
 }
 
-IsolatePtr NewIsolate(IsolateConstraintsPtr constraints) {
+static IsolatePtr NewIsolateInternal(IsolateConstraintsPtr constraints, bool add_heap_limit_cb) {
   Isolate::CreateParams params;
   params.array_buffer_allocator = default_allocator;
 
@@ -64,7 +67,7 @@ IsolatePtr NewIsolate(IsolateConstraintsPtr constraints) {
   Isolate::Scope isolate_scope(iso);
   HandleScope handle_scope(iso);
 
-  ConfigureIsolate(iso);
+  ConfigureIsolate(iso, add_heap_limit_cb);
 
   m_ctx* ctx = new m_ctx;
   ctx->ptr.Reset(iso, Context::New(iso));
@@ -72,6 +75,14 @@ IsolatePtr NewIsolate(IsolateConstraintsPtr constraints) {
   iso->SetData(0, ctx);
 
   return iso;
+}
+
+IsolatePtr NewIsolate(IsolateConstraintsPtr constraints) {
+  return NewIsolateInternal(constraints, true);
+}
+
+IsolatePtr NewIsolateNoDefaultHeapCB(IsolateConstraintsPtr constraints) {
+  return NewIsolateInternal(constraints, false);
 }
 
 IsolatePtr NewIsolateWithSnapshot(IsolateConstraintsPtr constraints,
@@ -101,7 +112,7 @@ IsolatePtr NewIsolateWithSnapshot(IsolateConstraintsPtr constraints,
   Isolate::Scope isolate_scope(iso);
   HandleScope handle_scope(iso);
 
-  ConfigureIsolate(iso);
+  ConfigureIsolate(iso, true);
 
   m_ctx* ctx = new m_ctx;
   ctx->iso = iso;
@@ -164,5 +175,32 @@ IsolateHStatistics IsolationGetHeapStatistics(IsolatePtr iso) {
                             hs.peak_malloced_memory(),
                             hs.number_of_native_contexts(),
                             hs.number_of_detached_contexts()};
+}
+
+// ChessCom: GC and memory pressure APIs
+
+void IsolateLowMemoryNotification(IsolatePtr iso) {
+  iso->LowMemoryNotification();
+}
+
+void IsolateMemoryPressureNotification(IsolatePtr iso, int level) {
+  iso->MemoryPressureNotification(static_cast<MemoryPressureLevel>(level));
+}
+
+void IsolateCancelTerminateExecution(IsolatePtr iso) {
+  iso->CancelTerminateExecution();
+}
+
+void IsolateRequestGarbageCollectionForTesting(IsolatePtr iso, int type) {
+  iso->RequestGarbageCollectionForTesting(
+      static_cast<Isolate::GarbageCollectionType>(type));
+}
+
+void IsolateContextDisposedNotification(IsolatePtr iso, int dependant_context) {
+  if (dependant_context) {
+    iso->ContextDisposedNotification(ContextDependants::kSomeDependants);
+  } else {
+    iso->ContextDisposedNotification(ContextDependants::kNoDependants);
+  }
 }
 }

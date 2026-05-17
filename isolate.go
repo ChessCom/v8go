@@ -28,6 +28,11 @@ type Isolate struct {
 	undefined *Value
 
 	snapshotData unsafe.Pointer // pinned C copy, freed in Dispose
+
+	nearHeapLimitCB NearHeapLimitCallback
+	promiseRejectCB PromiseRejectCallback
+	gcPrologueCBs   []GCCallback
+	gcEpilogueCBs   []GCCallback
 }
 
 // HeapStatistics represents V8 isolate heap statistics
@@ -55,8 +60,9 @@ type IsolateOption func(*isolateConfig)
 
 // isolateConfig holds the configuration for creating an isolate.
 type isolateConfig struct {
-	resourceConstraints *resourceConstraints
-	snapshotBlob        []byte
+	resourceConstraints      *resourceConstraints
+	snapshotBlob             []byte
+	disableDefaultHeapLimitCB bool
 }
 
 // WithResourceConstraints sets memory constraints for the isolate.
@@ -128,12 +134,15 @@ func NewIsolate(opts ...IsolateOption) *Isolate {
 			C.int(len(config.snapshotBlob)),
 			frozenExtRefArray(),
 		)
+	} else if config.disableDefaultHeapLimitCB {
+		iso.ptr = C.NewIsolateNoDefaultHeapCB(cConstraints)
 	} else {
 		iso.ptr = C.NewIsolate(cConstraints)
 	}
 
 	iso.null = newValueNull(iso)
 	iso.undefined = newValueUndefined(iso)
+	registerIsolate(iso)
 	return iso
 }
 
@@ -148,6 +157,68 @@ func (i *Isolate) TerminateExecution() {
 // on the stack and the termination exception is still active.
 func (i *Isolate) IsExecutionTerminating() bool {
 	return C.IsolateIsExecutionTerminating(i.ptr) == 1
+}
+
+// MemoryPressureLevel represents the severity of memory pressure.
+type MemoryPressureLevel int
+
+const (
+	MemoryPressureNone     MemoryPressureLevel = 0
+	MemoryPressureModerate MemoryPressureLevel = 1
+	MemoryPressureCritical MemoryPressureLevel = 2
+)
+
+// LowMemoryNotification signals V8 to perform a full garbage collection
+// to free as much memory as possible. This is a synchronous call that
+// blocks until GC completes. Use MemoryPressureNotification for a more
+// nuanced signal.
+func (i *Isolate) LowMemoryNotification() {
+	C.IsolateLowMemoryNotification(i.ptr)
+}
+
+// MemoryPressureNotification signals V8 about the current memory pressure
+// level so it can adjust its GC strategy accordingly.
+// MemoryPressureNone allows V8 to use its default GC schedule.
+// MemoryPressureModerate speeds up incremental GC at the cost of latency.
+// MemoryPressureCritical triggers aggressive GC to free memory immediately.
+func (i *Isolate) MemoryPressureNotification(level MemoryPressureLevel) {
+	C.IsolateMemoryPressureNotification(i.ptr, C.int(level))
+}
+
+// CancelTerminateExecution cancels a pending TerminateExecution request.
+// This is useful when recycling an isolate after a timeout: call
+// CancelTerminateExecution before running new scripts so the termination
+// flag from the previous execution does not kill the next one.
+func (i *Isolate) CancelTerminateExecution() {
+	C.IsolateCancelTerminateExecution(i.ptr)
+}
+
+// GarbageCollectionType selects which GC generation to collect.
+type GarbageCollectionType int
+
+const (
+	GCTypeFull  GarbageCollectionType = 0
+	GCTypeMinor GarbageCollectionType = 1
+)
+
+// RequestGarbageCollectionForTesting triggers an explicit garbage collection.
+// This only works when V8 is started with the --expose_gc flag
+// (via SetFlags("--expose_gc") before creating any isolate).
+// Intended for testing only — do not use in production.
+func (i *Isolate) RequestGarbageCollectionForTesting(typ GarbageCollectionType) {
+	C.IsolateRequestGarbageCollectionForTesting(i.ptr, C.int(typ))
+}
+
+// ContextDisposedNotification notifies V8 that a context has been disposed.
+// V8 uses this to tune garbage collection and finalization scheduling.
+// Call this after Context.Close() when the context will not be reused.
+// Set dependantContext to true if other contexts depend on this one.
+func (i *Isolate) ContextDisposedNotification(dependantContext bool) {
+	dep := 0
+	if dependantContext {
+		dep = 1
+	}
+	C.IsolateContextDisposedNotification(i.ptr, C.int(dep))
 }
 
 type CompileOptions struct {
@@ -221,6 +292,7 @@ func (i *Isolate) Dispose() {
 	if i.ptr == nil {
 		return
 	}
+	unregisterIsolate(i)
 	// Serialise dispose against snapshotDeserMu: V8 14.x corrupts its
 	// shared-heap teardown state if a parallel goroutine is constructing
 	// a new isolate at the same moment we are tearing one down. The

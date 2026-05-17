@@ -27,6 +27,12 @@ int ObjectDelete(ValuePtr ptr, const char* key);
 int ObjectDeleteAnyKey(ValuePtr ptr, ValuePtr key);
 int ObjectDeleteIdx(ValuePtr ptr, uint32_t idx);
 
+// ChessCom: object enumeration and prototype access
+extern RtnValue ObjectGetPropertyNames(ValuePtr ptr);
+extern RtnValue ObjectGetOwnPropertyNames(ValuePtr ptr);
+extern ValuePtr ObjectGetPrototype(ValuePtr ptr);
+extern RtnValue ObjectSetPrototype(ValuePtr ptr, ValuePtr proto_ptr);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

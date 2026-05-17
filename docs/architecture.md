@@ -362,3 +362,40 @@ removes the shim so consumers get live wall-clock and random values.
 
 The seed is configurable via `SeedTimeMillis` (default: a fixed epoch
 value) or the `PackOptions.SeedMillis` field.
+
+## Isolate callback architecture
+
+The fork adds several V8 isolate-level callbacks that cross the
+CGO boundary via trampoline functions in dedicated C++ files.
+
+```mermaid
+graph LR
+    V8[V8 Engine] -->|fires callback| CC[C++ trampoline]
+    CC -->|cgo export| Go[Go callback]
+    Go -->|lookupIsolate| Reg[Isolate Registry]
+    Reg -->|*Isolate| Go
+    Go -->|invoke| User[User callback fn]
+```
+
+### Isolate registry
+
+Since V8 callbacks pass only the `Isolate*` pointer (or nothing for
+GC callbacks), the Go side maintains a `sync.RWMutex`-protected map
+from `uintptr(iso.ptr)` → `*Isolate` in `isolate_registry.go`.
+Every `NewIsolate` registers and every `Dispose` unregisters.
+
+### Callback trampolines
+
+Each callback category lives in its own `.h`/`.cc`/`.go` triple:
+
+| Category | C++ file | Go export | V8 API |
+|---|---|---|---|
+| Heap limit | `heap_limit.cc` | `goNearHeapLimitCallback` | `AddNearHeapLimitCallback` |
+| Promise reject | `promise_reject.cc` | `goPromiseRejectCallback` | `SetPromiseRejectCallback` |
+| GC prologue | `gc_callback.cc` | `goGCPrologueCallback` | `AddGCPrologueCallback` (with data) |
+| GC epilogue | `gc_callback.cc` | `goGCEpilogueCallback` | `AddGCEpilogueCallback` (with data) |
+| Interrupt | `interrupt.cc` | _(C-only terminate)_ | `RequestInterrupt` |
+
+The interrupt callback is special: it terminates execution directly in
+C (`TerminateExecution`) without crossing back to Go, avoiding
+reentrancy issues with CGO during JS execution.

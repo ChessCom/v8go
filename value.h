@@ -156,9 +156,6 @@ int ObjectHasIdx(ValuePtr ptr, uint32_t idx);
 int ObjectDelete(ValuePtr ptr, const char* key);
 int ObjectDeleteAnyKey(ValuePtr ptr, ValuePtr key);
 int ObjectDeleteIdx(ValuePtr ptr, uint32_t idx);
-extern RtnValue ObjectGetPrototype(ValuePtr ptr);
-extern void ObjectSetPrototype(ValuePtr ptr, ValuePtr proto_ptr);
-
 extern void BackingStoreRelease(BackingStorePtr ptr);
 extern void* BackingStoreData(BackingStorePtr ptr);
 extern size_t BackingStoreByteLength(BackingStorePtr ptr);

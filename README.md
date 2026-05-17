@@ -249,12 +249,18 @@ See `deps/v8/` for the version of V8 currently in use. Prebuilt static
 libraries of V8 are included for Linux and macOS so you should not need
 to build V8 yourself.
 
-## Development
+## Documentation
 
-See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for pull request
-guidelines, [docs/MAINTAINING.md](docs/MAINTAINING.md) for repository
-setup and secret configuration, and [docs/CHANGELOG.md](docs/CHANGELOG.md)
-for release history.
+| Document | Description |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Internal design: object model, CGO bridge, snapshot system, concurrency |
+| [docs/performance.md](docs/performance.md) | Cold-start benchmarks, memory, deterministic snapshots, sizing |
+| [docs/api-reference.md](docs/api-reference.md) | Comprehensive API reference with code examples |
+| [docs/zero-cold-start.md](docs/zero-cold-start.md) | Exploring techniques for true zero cold start |
+| [docs/MAINTAINING.md](docs/MAINTAINING.md) | Fork maintenance: upstream sync, V8 upgrades, downstream compat |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+
+## Development
 
 ### Building from source
 

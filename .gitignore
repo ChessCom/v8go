@@ -1,0 +1,12 @@
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.test
+*.out
+coverage.out
+.DS_Store
+.idea/
+.vscode/

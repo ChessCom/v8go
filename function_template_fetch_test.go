@@ -1,7 +1,3 @@
-// Copyright 2021 Roger Chapman and the v8go contributors. All rights reserved.
-// Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file.
-
 // Ignore leaks within Go standard libraries http/https support code.
 // The getaddrinfo detected leaks can be avoided using GODEBUG=netdns=go but
 // currently there are more for loading system root certificates on macOS.

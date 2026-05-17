@@ -319,10 +319,6 @@ This repository tracks [tommie/v8go](https://github.com/tommie/v8go)
 as its upstream. A weekly [GitHub Actions workflow](.github/workflows/upstream-sync.yml)
 checks for new upstream commits and opens a merge PR automatically.
 
-## License
-
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B22862%2Fgit%40github.com%3Atommie%2Fv8go.git.svg?type=large)](https://app.fossa.com/projects/custom%2B22862%2Fgit%40github.com%3Atommie%2Fv8go.git?ref=badge_large)
-
 ---
 
 V8 Gopher image based on original artwork from the amazing [Renee French](http://reneefrench.blogspot.com).

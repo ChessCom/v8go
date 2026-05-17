@@ -60,8 +60,8 @@ type IsolateOption func(*isolateConfig)
 
 // isolateConfig holds the configuration for creating an isolate.
 type isolateConfig struct {
-	resourceConstraints      *resourceConstraints
-	snapshotBlob             []byte
+	resourceConstraints       *resourceConstraints
+	snapshotBlob              []byte
 	disableDefaultHeapLimitCB bool
 }
 

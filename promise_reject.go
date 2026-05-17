@@ -7,10 +7,10 @@ import "C"
 type PromiseRejectEvent int
 
 const (
-	PromiseRejectWithNoHandler       PromiseRejectEvent = 0
-	PromiseHandlerAddedAfterReject   PromiseRejectEvent = 1
-	PromiseRejectAfterResolved       PromiseRejectEvent = 2
-	PromiseResolveAfterResolved      PromiseRejectEvent = 3
+	PromiseRejectWithNoHandler     PromiseRejectEvent = 0
+	PromiseHandlerAddedAfterReject PromiseRejectEvent = 1
+	PromiseRejectAfterResolved     PromiseRejectEvent = 2
+	PromiseResolveAfterResolved    PromiseRejectEvent = 3
 )
 
 // PromiseRejectMessage is passed to the PromiseRejectCallback with details

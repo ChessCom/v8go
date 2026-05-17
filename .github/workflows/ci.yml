@@ -1,0 +1,73 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: unit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      - name: go build
+        run: go build ./...
+      - name: go test
+        run: go test -count=1 -timeout 5m ./...
+
+  vet:
+    name: vet (gofmt + go vet + clang-format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      - name: gofmt
+        run: |
+          set -o pipefail
+          unformatted=$(gofmt -l . | { grep -v '^deps/' || true; })
+          if [ -n "$unformatted" ]; then
+            echo "gofmt diff in:"
+            echo "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: clang-format dry-run
+        run: |
+          shopt -s nullglob
+          files=()
+          for f in *.cc *.h context-macros.h value-macros.h; do
+            [ -f "$f" ] || continue
+            # skip vendored V8 headers under deps/
+            files+=("$f")
+          done
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no C++ files to check"
+            exit 0
+          fi
+          fails=0
+          for f in "${files[@]}"; do
+            if ! clang-format --style=Google --dry-run --Werror "$f" 2>/dev/null; then
+              fails=$((fails+1))
+            fi
+          done
+          # clang-format dry-run is advisory in this first cut; do not gate.
+          echo "clang-format reported $fails non-conforming file(s); not gating."

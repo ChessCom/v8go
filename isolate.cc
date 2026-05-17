@@ -180,23 +180,32 @@ IsolateHStatistics IsolationGetHeapStatistics(IsolatePtr iso) {
 // ChessCom: GC and memory pressure APIs
 
 void IsolateLowMemoryNotification(IsolatePtr iso) {
+  Locker locker(iso);
+  Isolate::Scope isolate_scope(iso);
   iso->LowMemoryNotification();
 }
 
 void IsolateMemoryPressureNotification(IsolatePtr iso, int level) {
+  Locker locker(iso);
+  Isolate::Scope isolate_scope(iso);
   iso->MemoryPressureNotification(static_cast<MemoryPressureLevel>(level));
 }
 
+// Thread-safe per V8 spec — no Locker needed.
 void IsolateCancelTerminateExecution(IsolatePtr iso) {
   iso->CancelTerminateExecution();
 }
 
 void IsolateRequestGarbageCollectionForTesting(IsolatePtr iso, int type) {
+  Locker locker(iso);
+  Isolate::Scope isolate_scope(iso);
   iso->RequestGarbageCollectionForTesting(
       static_cast<Isolate::GarbageCollectionType>(type));
 }
 
 void IsolateContextDisposedNotification(IsolatePtr iso, int dependant_context) {
+  Locker locker(iso);
+  Isolate::Scope isolate_scope(iso);
   if (dependant_context) {
     iso->ContextDisposedNotification(ContextDependants::kSomeDependants);
   } else {

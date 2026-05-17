@@ -1,13 +1,40 @@
 # Execute JavaScript from Go
 
-<a href="https://github.com/tommie/v8go/releases"><img src="https://img.shields.io/github/v/release/tommie/v8go" alt="Github release"></a>
-[![Go Report Card](https://goreportcard.com/badge/github.com/tommie/v8go)](https://goreportcard.com/report/github.com/tommie/v8go)
-[![Go Reference](https://pkg.go.dev/badge/github.com/tommie/v8go.svg)](https://pkg.go.dev/github.com/tommie/v8go)
-[![Test](https://github.com/tommie/v8go/actions/workflows/test.yml/badge.svg)](https://github.com/tommie/v8go/actions/workflows/test.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ChessCom/v8go.svg)](https://pkg.go.dev/github.com/ChessCom/v8go)
+[![ci](https://github.com/ChessCom/v8go/actions/workflows/ci.yml/badge.svg)](https://github.com/ChessCom/v8go/actions/workflows/ci.yml)
 
 <img src="gopher.jpg" width="200px" alt="V8 Gopher based on original artwork from the amazing Renee French" style="float:right" />
 
-## Relation to `rogchap.com/v8go`
+## Relation to upstream
+
+This is the ChessCom fork of [github.com/tommie/v8go](https://github.com/tommie/v8go),
+which is itself a fork of [github.com/rogchap/v8go](https://github.com/rogchap/v8go)
+at v0.9.0. The original upstream README sections (relation to rogchap,
+build pipeline notes, etc.) are preserved verbatim further down for
+posterity.
+
+The ChessCom fork adds:
+
+* **`v8::SnapshotCreator` bindings** — produce V8 startup blobs from Go
+  with full support for `external_references` (Go-backed
+  `FunctionTemplate` callbacks). See the [Snapshots](#snapshots-for-cold-start)
+  section below.
+* **High-level Pack/Restore API** — versioned snapshot envelope with
+  V8 ABI + external-references digest validation so a stale or
+  corrupt blob is rejected before V8 ever sees it.
+* **Deterministic snapshot mode** — pin `Date.now`, `Math.random`,
+  and `performance.now` to a seed so snapshot inputs are reproducible.
+* **Concurrency-safe wrapper** — process-wide serialisation of
+  isolate construction/disposal and thread-pinning for
+  `SnapshotCreator`, working around V8 14.x process-state fragility.
+
+### Versioning
+
+Tags follow `vMAJOR.MINOR.PATCH-chess.N`. The first release tracking
+this fork is `v0.34.0-chess.0` (mirroring `tommie/v8go@v0.34.0` plus
+the changes above).
+
+### Original upstream notes (for archaeology)
 
 This is a fork of https://github.com/rogchap/v8go at v0.9.0.
 
@@ -31,7 +58,7 @@ Major differences include
 ## Usage
 
 ```go
-import v8 "github.com/tommie/v8go"
+import v8 "github.com/ChessCom/v8go"
 ```
 
 ### Running a script
@@ -56,6 +83,41 @@ if _, err := ctx2.RunScript("multiply(3, 4)", "main.js"); err != nil {
   // this will error as multiply is not defined in this context
 }
 ```
+
+### Snapshots for cold start
+
+V8 startup blobs let you do all the expensive parse + compile + warmup
+work once at build time and recover the resulting heap for free at
+runtime. The ChessCom fork exposes both a low-level
+`SnapshotCreator` binding and a high-level Pack/Restore API.
+
+```go
+// Build side: produce a versioned snapshot envelope.
+packed, err := v8.PackBundle(v8.PackOptions{
+    Source:            string(bundleJS),
+    Origin:            "bundle.js",
+    DeterministicTime: true,                 // pin Date.now / Math.random / performance.now
+    SeedMillis:        v8.SeedTimeMillis,
+    FCH:               v8.FunctionCodeKeep,  // keep compiled code in the blob
+})
+blob, err := packed.Marshal() // safe to write to disk / object storage / KV
+
+// Consumer side: validate envelope, restore an isolate, evaluate
+// any per-instance code.
+p, err := v8.UnmarshalPackedSnapshot(blob)
+iso, err := p.RestoreIsolate(v8.RestoreOptions{}) // rejects ABI / refs mismatch
+ctx := v8.NewContext(iso)
+ctx.RunScript("globalThis.handle(request)", "handler.js")
+```
+
+Round-trip on a ~750 KiB synthetic bundle is roughly **3.5–6× faster**
+than re-parsing the source at boot; absolute cold-start drops from
+~15 ms to ~4 ms on M-class hardware.
+
+`FunctionTemplate` callbacks (Go closures) survive the snapshot via
+the process-wide `external_references` registry; the embedder MUST
+re-register them on the consumer isolate after `RestoreIsolate` —
+see `gostate_rehydrate_test.go` for the canonical pattern.
 
 ### JavaScript function with Go callback
 

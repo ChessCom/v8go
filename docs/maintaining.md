@@ -195,3 +195,16 @@ Configure under **Settings > Branches > main** with:
 - Optional (when token is set): `compat-blindfox (*)`, `compat-er (*)`
 - Require branches to be up to date before merging
 - Restrict pushes to maintainers only
+
+## License headers
+
+This fork does **not** carry license headers or a `LICENSE` file.
+Upstream `tommie/v8go` ships BSD-style headers on every source file;
+those are stripped during upstream syncs to keep the codebase clean.
+
+When merging an upstream sync PR:
+
+1. Run `grep -rl 'Use of this source code is governed by' --include='*.go' --include='*.h' --include='*.cc' . | grep -v '^./deps/'` to find any re-introduced headers.
+2. Strip them: remove the 3-line `// Copyright … // found in the LICENSE file.` block and the trailing blank line.
+3. If upstream re-adds a `LICENSE` file at the root, delete it.
+4. Do **not** touch files under `deps/` — those are upstream V8 headers and must stay intact.

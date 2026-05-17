@@ -165,13 +165,9 @@ once both downstreams import `github.com/ChessCom/v8go` directly.
 
 ## Release process
 
-Tags follow `vMAJOR.MINOR.PATCH-chess.N` (e.g. `v0.34.0-chess.0`),
-where `MAJOR.MINOR.PATCH` mirrors the upstream `tommie/v8go` version
-and `-chess.N` increments for each ChessCom change set.
-
-1. Update `CHANGELOG.md` with a new section.
-2. `git tag vX.Y.Z-chess.N && git push origin vX.Y.Z-chess.N`.
-3. Trigger **auto-bump-downstreams** to open PRs in blindfox and er.
+See [docs/release.md](release.md) for the full release guide, including
+versioning scheme, step-by-step flow, consumer integration, and
+automation details.
 
 ## Repository secrets
 

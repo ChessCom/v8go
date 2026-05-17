@@ -15,6 +15,7 @@ on:
         description: "v8go SHA to bump downstreams to (defaults to current HEAD)."
         required: false
         type: string
+  workflow_call:
 
 permissions:
   contents: read

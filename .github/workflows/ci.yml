@@ -72,6 +72,33 @@ jobs:
           # clang-format dry-run is advisory in this first cut; do not gate.
           echo "clang-format reported $fails non-conforming file(s); not gating."
 
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      - name: run tests with coverage
+        run: go test -count=1 -timeout 5m -coverprofile=coverage.out ./...
+      - name: enforce coverage threshold
+        run: |
+          total=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${total}%"
+          # Threshold is 95%: the remaining ~4-5% consists of defensive
+          # panic guards against nil C returns, GC finalizers, and
+          # process-global registry branches that cannot be reached
+          # through the public Go API.
+          if [ "$(echo "$total < 95.0" | bc)" -eq 1 ]; then
+            echo "FAIL: coverage is ${total}%, required >= 95%"
+            echo ""
+            echo "Uncovered functions:"
+            go tool cover -func=coverage.out | grep -v '100.0%'
+            exit 1
+          fi
+
   compat-blindfox:
     # D1: verify the v8go HEAD we are about to merge still builds and
     # tests cleanly when dropped into blindfox. Requires a

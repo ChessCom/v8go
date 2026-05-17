@@ -1,0 +1,70 @@
+name: upstream-sync
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # every Monday at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: add upstream remote
+        run: git remote add upstream https://github.com/tommie/v8go.git || true
+
+      - name: fetch upstream
+        run: git fetch upstream
+
+      - name: check for new commits
+        id: check
+        run: |
+          base=$(git merge-base HEAD upstream/master 2>/dev/null || echo "")
+          if [ -z "$base" ]; then
+            echo "No common ancestor found; skipping."
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          upstream_head=$(git rev-parse upstream/master)
+          if [ "$base" = "$upstream_head" ]; then
+            echo "Already up to date with upstream."
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+          else
+            count=$(git rev-list "$base"..upstream/master --count)
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+            echo "new_commits=$count" >> "$GITHUB_OUTPUT"
+            echo "Found $count new upstream commit(s)."
+          fi
+
+      - name: create sync branch and merge
+        if: steps.check.outputs.up_to_date != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          branch="auto/upstream-sync-$(date +%Y%m%d)"
+          git checkout -b "$branch"
+          git merge upstream/master --no-edit || echo "Merge conflicts detected — manual resolution required."
+
+      - name: open PR
+        if: steps.check.outputs.up_to_date != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch="auto/upstream-sync-$(date +%Y%m%d)"
+          git push -u origin "$branch"
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "upstream: merge tommie/v8go (${{ steps.check.outputs.new_commits }} new commits)" \
+            --body "Automated merge of upstream \`tommie/v8go\` master.
+          ${{ steps.check.outputs.new_commits }} new commit(s) since last sync.
+
+          Review merge conflicts (if any) and ensure CI passes before merging." \
+            --label upstream,automated || echo "PR already exists for this branch."

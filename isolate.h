@@ -51,6 +51,7 @@ typedef struct {
 typedef IsolateConstraints* IsolateConstraintsPtr;
 
 extern IsolatePtr NewIsolate(IsolateConstraintsPtr constraints);
+extern IsolatePtr NewIsolateNoDefaultHeapCB(IsolateConstraintsPtr constraints);
 extern IsolatePtr NewIsolateWithSnapshot(IsolateConstraintsPtr constraints,
                                          const char* snapshot_data,
                                          int snapshot_length);
@@ -68,6 +69,13 @@ extern RtnUnboundScript IsolateCompileUnboundScript(IsolatePtr iso_ptr,
                                                     const char* source,
                                                     const char* origin,
                                                     CompileOptions options);
+
+// ChessCom: GC and memory pressure APIs
+extern void IsolateLowMemoryNotification(IsolatePtr ptr);
+extern void IsolateMemoryPressureNotification(IsolatePtr ptr, int level);
+extern void IsolateCancelTerminateExecution(IsolatePtr ptr);
+extern void IsolateRequestGarbageCollectionForTesting(IsolatePtr ptr, int type);
+extern void IsolateContextDisposedNotification(IsolatePtr ptr, int dependant_context);
 
 #ifdef __cplusplus
 }  // extern "C"

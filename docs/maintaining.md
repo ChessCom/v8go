@@ -28,12 +28,24 @@ The fork-specific C++ files are the most common source of conflicts:
 | Fork file | Upstream counterpart | Why they conflict |
 |---|---|---|
 | `snapshot.h` / `snapshot.cc` | _does not exist upstream_ | Upstream may rename or restructure headers that `snapshot.cc` includes |
-| `isolate.h` / `isolate.cc` | same | Fork adds `SnapshotCreatorPtr` typedefs and isolate construction helpers |
+| `isolate.h` / `isolate.cc` | same | Fork adds GC/memory pressure exports, `NewIsolateNoDefaultHeapCB`, `SnapshotCreatorPtr` typedefs |
 | `v8go.h` / `v8go.cc` | same | Fork registers additional C exports for the snapshot bridge |
+| `object.h` / `object.cc` | same | Fork adds `ObjectGetPropertyNames`, `ObjectGetOwnPropertyNames`, `ObjectGetPrototype`, `ObjectSetPrototype` |
+| `heap_limit.h` / `heap_limit.cc` | _does not exist upstream_ | Custom near-heap-limit callback trampoline |
+| `promise_reject.h` / `promise_reject.cc` | _does not exist upstream_ | Promise reject callback trampoline |
+| `interrupt.h` / `interrupt.cc` | _does not exist upstream_ | Interrupt termination + SetIdle wrappers |
+| `gc_callback.h` / `gc_callback.cc` | _does not exist upstream_ | GC prologue/epilogue callback trampolines |
+| `isolate_registry.go` | _does not exist upstream_ | Global Go-side isolate registry for CGO callback dispatch |
 
 When conflicts appear, resolve them locally, ensure the CI matrix
 passes on both ubuntu-latest and macos-latest, and push to the sync
 branch. If conflicts are non-trivial, tag a second reviewer.
+
+**Important**: fork-only `.h`/`.cc` files (heap_limit, promise_reject,
+interrupt, gc_callback) will never conflict with upstream directly, but
+they may break if upstream renames V8 headers they include or changes
+the V8 API signatures they call. When upstream bumps V8, compile all
+fork-only C++ files first to catch breakage early.
 
 ### Skipping a sync
 
@@ -67,8 +79,9 @@ etc.). When upstream bumps the V8 version:
 
 ## CGO surface drift
 
-The fork extends the upstream C bridge with snapshot-related functions.
-These are the fork-specific C exports (in `snapshot.h` / `snapshot.cc`):
+The fork extends the upstream C bridge across several areas.
+
+### Snapshot system (`snapshot.h` / `snapshot.cc`)
 
 - `NewSnapshotCreator`
 - `SnapshotCreatorGetIsolate`
@@ -77,15 +90,52 @@ These are the fork-specific C exports (in `snapshot.h` / `snapshot.cc`):
 - `SnapshotCreatorDispose`
 - `SnapshotCreatorFreeBlob`
 
-And the fork-modified exports (in `isolate.h` / `v8go.cc`):
+### Isolate extensions (`isolate.h` / `isolate.cc`)
 
-- `NewIsolateFromSnapshot` — extended to accept snapshot startup data
-- `SnapshotCreatorPtr` typedef
+- `NewIsolateNoDefaultHeapCB` — creates isolate without the default near-heap-limit callback
+- `IsolateLowMemoryNotification` — triggers full GC
+- `IsolateMemoryPressureNotification` — signals memory pressure level
+- `IsolateCancelTerminateExecution` — cancels pending termination
+- `IsolateRequestGarbageCollectionForTesting` — forces GC (testing only)
+- `IsolateContextDisposedNotification` — context disposal hint
+
+### Object extensions (`object.h` / `object.cc`)
+
+- `ObjectGetPropertyNames` — enumerate all property names including prototype chain
+- `ObjectGetOwnPropertyNames` — enumerate own property names only
+- `ObjectGetPrototype` — get object prototype
+- `ObjectSetPrototype` — set object prototype
+
+### Heap limit callbacks (`heap_limit.h` / `heap_limit.cc`)
+
+- `IsolateAddCustomNearHeapLimitCallback` — installs Go-side heap limit callback
+- `IsolateRemoveCustomNearHeapLimitCallback` — removes custom callback
+
+### Promise reject callbacks (`promise_reject.h` / `promise_reject.cc`)
+
+- `IsolateSetPromiseRejectCallback` — installs promise rejection handler
+
+### Interrupt and idle (`interrupt.h` / `interrupt.cc`)
+
+- `IsolateRequestInterruptTerminate` — schedules termination via interrupt
+- `IsolateSetIdle` — hints idle state to V8
+
+### GC callbacks (`gc_callback.h` / `gc_callback.cc`)
+
+- `IsolateAddGCPrologueCallback` / `IsolateRemoveGCPrologueCallback`
+- `IsolateAddGCEpilogueCallback` / `IsolateRemoveGCEpilogueCallback`
+
+### Conflict resolution for API surface changes
 
 When upstream modifies the signatures of existing C exports (e.g.
 `NewIsolate`, `IsolateDispose`), the fork-specific additions must be
-re-aligned. Grep for `// ChessCom:` comments in C++ files to locate
-fork-specific modifications quickly.
+re-aligned. Follow this process:
+
+1. **Identify affected files**: Grep for `// ChessCom:` comments in C++ files to locate fork-specific modifications.
+2. **Check all fork-only headers**: Compile `heap_limit.cc`, `promise_reject.cc`, `interrupt.cc`, `gc_callback.cc` first — they include V8 headers and will break immediately if signatures changed.
+3. **Verify callback trampolines**: If upstream changes `v8::Isolate` internals, verify that `_cgo_export.h` still generates correct signatures for `goNearHeapLimitCallback`, `goPromiseRejectCallback`, `goGCPrologueCallback`, `goGCEpilogueCallback`.
+4. **Check data slot usage**: Slots 0 (m_ctx), 1 (snapshot blob), and 2 (embedder ctx in snapshot) are in use. If upstream claims new slots, renumber.
+5. **Run full test suite**: `go test -count=1 -timeout 5m ./...` must pass. Pay special attention to `gc_test.go`, `heap_limit_test.go`, `promise_reject_test.go`, `interrupt_test.go`, `gc_callback_test.go`, `object_enum_test.go`.
 
 ## Downstream compatibility
 

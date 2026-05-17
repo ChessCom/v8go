@@ -5,6 +5,53 @@ follow `vMAJOR.MINOR.PATCH-chess.N`, where `MAJOR.MINOR.PATCH` mirrors
 the upstream `tommie/v8go` version this fork tracks and `chess.N`
 increments per ChessCom-side change set.
 
+## v0.34.0-chess.1 — 2026-05
+
+API surface extensions for improved resilience and performance.
+
+### Added
+
+* **GC and memory pressure APIs** (`isolate.go`):
+  `LowMemoryNotification`, `MemoryPressureNotification` (None/Moderate/Critical),
+  `CancelTerminateExecution`, `RequestGarbageCollectionForTesting`,
+  `ContextDisposedNotification`.
+* **Configurable heap limit policy** (`heap_limit.go`):
+  `WithoutDefaultHeapLimitCallback` option, `AddNearHeapLimitCallback`,
+  `RemoveNearHeapLimitCallback` — allows custom Go callbacks when the
+  heap approaches the configured maximum.
+* **Object enumeration and prototype access** (`object.go`):
+  `Object.GetPropertyNames`, `Object.GetOwnPropertyNames`,
+  `Object.GetPrototype`, `Object.SetPrototype`.
+* **Promise reject callback** (`promise_reject.go`):
+  `Isolate.SetPromiseRejectCallback` — notifies Go of unhandled
+  promise rejections with event type, promise, and rejection value.
+* **Interrupt and idle** (`interrupt.go`):
+  `Isolate.RequestInterrupt` (terminates via V8 interrupt mechanism),
+  `Isolate.SetIdle` (hints idle state for speculative GC).
+* **GC prologue/epilogue callbacks** (`gc_callback.go`):
+  `AddGCPrologueCallback`, `RemoveGCPrologueCallbacks`,
+  `AddGCEpilogueCallback`, `RemoveGCEpilogueCallbacks` — observe GC
+  lifecycle with typed GC events.
+* **Isolate registry** (`isolate_registry.go`): process-global map
+  from `IsolatePtr` to `*Isolate` for CGO callback dispatch.
+
+### Changed
+
+* `ConfigureIsolate` in `isolate.cc` now accepts a `bool add_heap_limit_cb`
+  parameter; `NewIsolateNoDefaultHeapCB` bypasses the default callback.
+* Dead `ObjectGetPrototype`/`ObjectSetPrototype` declarations removed
+  from `value.h`; they now live in `object.h` with corrected signatures.
+
+### Documentation
+
+* Renamed `docs/MAINTAINING.md` → `docs/maintaining.md`.
+* Updated CGO surface drift table and conflict resolution guide for all
+  new fork-specific C++ files.
+* Added complete API reference sections for all new APIs.
+* Added callback architecture section to `docs/architecture.md`.
+
+---
+
 ## v0.34.0-chess.0 — 2026-05
 
 First release of the ChessCom fork.

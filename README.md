@@ -236,6 +236,19 @@ The ChessCom fork adds:
 * **Concurrency-safe wrapper** -- process-wide serialisation of
   isolate construction/disposal and thread-pinning for
   `SnapshotCreator`, working around V8 14.x process-state fragility.
+* **GC and memory pressure APIs** -- `LowMemoryNotification`,
+  `MemoryPressureNotification`, `CancelTerminateExecution`,
+  `RequestGarbageCollectionForTesting`, `ContextDisposedNotification`.
+* **Configurable heap limit policy** -- `AddNearHeapLimitCallback` with
+  `WithoutDefaultHeapLimitCallback` to replace the built-in OOM handler.
+* **Object enumeration** -- `GetPropertyNames`, `GetOwnPropertyNames`,
+  `GetPrototype`, `SetPrototype`.
+* **Promise reject callback** -- `SetPromiseRejectCallback` for
+  observing unhandled promise rejections.
+* **Interrupt and idle** -- `RequestInterrupt` (terminate via interrupt
+  mechanism) and `SetIdle` (hint idle state to V8).
+* **GC lifecycle callbacks** -- `AddGCPrologueCallback` and
+  `AddGCEpilogueCallback` for observing GC cycles with typed events.
 
 ## Versioning
 
@@ -257,7 +270,7 @@ to build V8 yourself.
 | [docs/performance.md](docs/performance.md) | Cold-start benchmarks, memory, deterministic snapshots, sizing |
 | [docs/api-reference.md](docs/api-reference.md) | Comprehensive API reference with code examples |
 | [docs/zero-cold-start.md](docs/zero-cold-start.md) | Exploring techniques for true zero cold start |
-| [docs/MAINTAINING.md](docs/MAINTAINING.md) | Fork maintenance: upstream sync, V8 upgrades, downstream compat |
+| [docs/maintaining.md](docs/maintaining.md) | Fork maintenance: upstream sync, V8 upgrades, downstream compat |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## Development

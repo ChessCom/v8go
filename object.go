@@ -185,3 +185,38 @@ func (o *Object) DeleteSymbol(key *Symbol) bool {
 func (o *Object) DeleteIdx(idx uint32) bool {
 	return C.ObjectDeleteIdx(o.ptr, C.uint32_t(idx)) != 0
 }
+
+// GetPropertyNames returns an array of all property names of the object,
+// including properties from the prototype chain. The returned value is
+// a JavaScript Array.
+func (o *Object) GetPropertyNames() (*Value, error) {
+	rtn := C.ObjectGetPropertyNames(o.ptr)
+	return valueResult(o.ctx, rtn)
+}
+
+// GetOwnPropertyNames returns an array of property names that belong
+// directly to this object (not inherited from the prototype chain).
+// The returned value is a JavaScript Array.
+func (o *Object) GetOwnPropertyNames() (*Value, error) {
+	rtn := C.ObjectGetOwnPropertyNames(o.ptr)
+	return valueResult(o.ctx, rtn)
+}
+
+// GetPrototype returns the prototype object of this object.
+func (o *Object) GetPrototype() *Value {
+	ptr := C.ObjectGetPrototype(o.ptr)
+	if ptr == nil {
+		return nil
+	}
+	return &Value{ptr, o.ctx}
+}
+
+// SetPrototype sets the prototype of this object. Returns an error if
+// the operation fails (e.g. if the object is not extensible).
+func (o *Object) SetPrototype(proto *Value) error {
+	rtn := C.ObjectSetPrototype(o.ptr, proto.ptr)
+	if rtn.value == nil && rtn.error.msg != nil {
+		return newJSError(rtn.error)
+	}
+	return nil
+}

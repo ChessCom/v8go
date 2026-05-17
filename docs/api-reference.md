@@ -842,3 +842,210 @@ v8.ErrorLevelError   // console.error
 v8.ErrorLevelWarning // console.warn
 v8.ErrorLevelAll     // bitmask of all levels
 ```
+
+---
+
+## GC and Memory Pressure
+
+### LowMemoryNotification
+
+Triggers a full garbage collection to free as much memory as possible.
+Blocks until GC completes.
+
+```go
+iso.LowMemoryNotification()
+```
+
+### MemoryPressureNotification
+
+Signals V8 about memory pressure so it adjusts its GC strategy.
+
+```go
+iso.MemoryPressureNotification(v8.MemoryPressureNone)     // default schedule
+iso.MemoryPressureNotification(v8.MemoryPressureModerate)  // speed up incremental GC
+iso.MemoryPressureNotification(v8.MemoryPressureCritical)  // aggressive GC
+```
+
+### CancelTerminateExecution
+
+Cancels a pending `TerminateExecution` request. Useful when recycling
+an isolate after a timeout.
+
+```go
+iso.TerminateExecution()       // schedule termination
+iso.CancelTerminateExecution() // cancel before next script runs
+```
+
+### RequestGarbageCollectionForTesting
+
+Forces an explicit GC cycle. Requires `--expose_gc` flag.
+
+```go
+v8.SetFlags("--expose_gc")
+iso := v8.NewIsolate()
+iso.RequestGarbageCollectionForTesting(v8.GCTypeFull)
+iso.RequestGarbageCollectionForTesting(v8.GCTypeMinor)
+```
+
+### ContextDisposedNotification
+
+Notifies V8 that a context was disposed to tune GC scheduling.
+
+```go
+ctx.Close()
+iso.ContextDisposedNotification(false) // no dependant contexts
+iso.ContextDisposedNotification(true)  // other contexts depend on this one
+```
+
+---
+
+## Heap Limit Callbacks
+
+### WithoutDefaultHeapLimitCallback
+
+Disables the built-in callback that calls `TerminateExecution` on OOM.
+
+```go
+iso := v8.NewIsolate(
+    v8.WithResourceConstraints(0, 50*1024*1024),
+    v8.WithoutDefaultHeapLimitCallback(),
+)
+```
+
+### AddNearHeapLimitCallback
+
+Installs a custom callback when the heap approaches the configured limit.
+
+```go
+iso.AddNearHeapLimitCallback(func(current, initial uint64) uint64 {
+    log.Printf("heap limit approaching: %d / %d", current, initial)
+    iso.TerminateExecution()
+    return current * 2 // must return > current to avoid crash
+})
+```
+
+### RemoveNearHeapLimitCallback
+
+Removes the custom callback and optionally restores a heap limit.
+
+```go
+iso.RemoveNearHeapLimitCallback(0) // keep current limit
+```
+
+---
+
+## Object Enumeration and Prototype Access
+
+### GetPropertyNames
+
+Returns all property names including inherited ones from the prototype chain.
+
+```go
+names, err := obj.GetPropertyNames()
+namesObj, _ := names.AsObject()
+length, _ := namesObj.Get("length")
+```
+
+### GetOwnPropertyNames
+
+Returns only the object's own property names (not inherited).
+
+```go
+names, err := obj.GetOwnPropertyNames()
+```
+
+### GetPrototype / SetPrototype
+
+Access and modify the prototype chain.
+
+```go
+proto := obj.GetPrototype()
+err := obj.SetPrototype(newProto)
+```
+
+---
+
+## Promise Reject Callback
+
+### SetPromiseRejectCallback
+
+Installs a callback for unhandled promise rejections.
+
+```go
+iso.SetPromiseRejectCallback(func(msg v8.PromiseRejectMessage) {
+    switch msg.Event {
+    case v8.PromiseRejectWithNoHandler:
+        log.Printf("unhandled rejection: %s", msg.Value.String())
+    case v8.PromiseHandlerAddedAfterReject:
+        log.Printf("handler added after reject")
+    case v8.PromiseRejectAfterResolved:
+        log.Printf("rejected after resolved")
+    case v8.PromiseResolveAfterResolved:
+        log.Printf("resolved after resolved")
+    }
+})
+```
+
+---
+
+## Interrupt and Idle
+
+### RequestInterrupt
+
+Requests V8 to terminate execution at the next interrupt check point.
+Safe to call from any goroutine.
+
+```go
+go func() {
+    time.Sleep(5 * time.Second)
+    iso.RequestInterrupt() // terminates long-running JS
+}()
+_, err := ctx.RunScript("while(true) {}", "loop.js")
+```
+
+### SetIdle
+
+Tells V8 whether the embedder is idle so it can do speculative work.
+
+```go
+iso.SetIdle(true)  // hint that embedder is idle
+iso.SetIdle(false) // back to active
+```
+
+---
+
+## GC Prologue and Epilogue Callbacks
+
+### AddGCPrologueCallback / AddGCEpilogueCallback
+
+Register callbacks that fire before and after each GC cycle.
+
+```go
+iso.AddGCPrologueCallback(func(gcType v8.GCType) {
+    log.Printf("GC starting: type=%d", gcType)
+})
+
+iso.AddGCEpilogueCallback(func(gcType v8.GCType) {
+    log.Printf("GC finished: type=%d", gcType)
+})
+```
+
+### GCType constants
+
+```go
+v8.GCTypeScavenge             // young generation
+v8.GCTypeMinorMarkSweep       // minor mark-sweep
+v8.GCTypeMarkSweepCompact     // full mark-sweep-compact
+v8.GCTypeIncrementalMarking   // incremental marking step
+v8.GCTypeProcessWeakCallbacks // weak callback processing
+v8.GCTypeAll                  // bitmask of all types
+```
+
+### RemoveGCPrologueCallbacks / RemoveGCEpilogueCallbacks
+
+Remove all registered callbacks.
+
+```go
+iso.RemoveGCPrologueCallbacks()
+iso.RemoveGCEpilogueCallbacks()
+```

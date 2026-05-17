@@ -19,6 +19,7 @@ class Context;
 
 typedef v8::Isolate v8Isolate;
 typedef struct m_unboundScript m_unboundScript;
+typedef struct m_template m_template;
 
 struct m_ctx {
   v8::Isolate* iso;
@@ -26,6 +27,16 @@ struct m_ctx {
   std::vector<m_unboundScript*> unboundScripts;
   v8::Persistent<v8::Context> ptr;
   long nextValId;
+  // templates tracks every m_template* allocated on this isolate while
+  // track_templates is enabled. SnapshotCreator.CreateBlob walks the
+  // list and Reset()s every template Global<> before serialisation —
+  // V8 fatal-aborts if any embedder-side handle still points at a
+  // FunctionTemplateInfo that is not reachable from the registered
+  // embedder context. The tracking is opt-in (only the SnapshotCreator
+  // path enables it) so concurrent NewFunctionTemplate calls on regular
+  // isolates do not race on the underlying vector.
+  bool track_templates;
+  std::vector<m_template*> templates;
 };
 typedef m_ctx* ContextPtr;
 

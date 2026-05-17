@@ -8,6 +8,7 @@ package v8go
 // #include "function_template.h"
 import "C"
 import (
+	"fmt"
 	"runtime"
 	"unsafe"
 )
@@ -203,6 +204,22 @@ func goFunctionCallback(
 	}
 
 	callbackFunc := ctx.iso.getCallback(cbref)
+	if callbackFunc == nil {
+		// The isolate has no Go closure registered for this callback
+		// reference. This commonly happens after restoring a snapshot
+		// that was produced with FunctionTemplates: the snapshot
+		// preserves the trampoline pointer (via external_references)
+		// and the integer ref, but Go-side closures must be
+		// re-registered on the consumer side. Return a JS error
+		// instead of nil-derefing.
+		errv, err := NewValue(ctx.iso, fmt.Sprintf(
+			"v8go: callback %d is not registered on this isolate; "+
+				"re-export functions after restoring a snapshot", cbref))
+		if err != nil {
+			return nil, nil
+		}
+		return nil, errv.ptr
+	}
 	val, err := callbackFunc(info)
 	if err != nil {
 		if verr, ok := err.(ValueError); ok {

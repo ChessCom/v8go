@@ -26,7 +26,7 @@ func hexDump(b []byte) string { return hex.EncodeToString(b) }
 // is built with --predictable / --hash-seed). The semantic identity
 // below is the property embedders actually care about.
 func TestDeterminism_ProbeValuesAreStable(t *testing.T) {
-	t.Parallel()
+	// Intentionally NOT t.Parallel(): SnapshotCreator and snapshot-restore paths touch V8 process-global state that races against parallel upstream tests on the v8 14.x binaries we ship.
 
 	const source = `
 const ts = Date.now();
@@ -81,7 +81,7 @@ globalThis.PROBE = { ts: ts, rnd: rnd, tick: tick };
 // don't run with those flags. Embedders that want hard byte-identity
 // should set V8 flags before any isolate is created.
 func TestDeterminism_BlobsByteIdentityBestEffort(t *testing.T) {
-	t.Parallel()
+	// Intentionally NOT t.Parallel(): SnapshotCreator and snapshot-restore paths touch V8 process-global state that races against parallel upstream tests on the v8 14.x binaries we ship.
 
 	const source = `globalThis.STAMP = Date.now();`
 
@@ -119,7 +119,7 @@ func TestDeterminism_BlobsByteIdentityBestEffort(t *testing.T) {
 // timestamp is observable from inside the snapshotted heap, confirming
 // the shim ran before the bundle.
 func TestDeterminism_SeedPropagatesIntoSnapshot(t *testing.T) {
-	t.Parallel()
+	// Intentionally NOT t.Parallel(): SnapshotCreator and snapshot-restore paths touch V8 process-global state that races against parallel upstream tests on the v8 14.x binaries we ship.
 
 	const seed = int64(1_700_000_000_000)
 	const source = `globalThis.STAMP = Date.now();`

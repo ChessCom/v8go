@@ -12,7 +12,7 @@ import (
 )
 
 func TestSnapshotRoundTrip_PureJS(t *testing.T) {
-	t.Parallel()
+	// Intentionally NOT t.Parallel(): SnapshotCreator and snapshot-restore paths touch V8 process-global state that races against parallel upstream tests on the v8 14.x binaries we ship.
 
 	sc := v8.NewSnapshotCreator()
 	ctx := sc.Context()
@@ -51,7 +51,7 @@ func TestSnapshotRoundTrip_PureJS(t *testing.T) {
 }
 
 func TestSnapshotCreator_ConsumedReturnsNil(t *testing.T) {
-	t.Parallel()
+	// Intentionally NOT t.Parallel(): SnapshotCreator and snapshot-restore paths touch V8 process-global state that races against parallel upstream tests on the v8 14.x binaries we ship.
 
 	sc := v8.NewSnapshotCreator()
 	_ = sc.Context()
@@ -102,7 +102,7 @@ func TestExternalReferenceRegistry_FrozenAfterUse(t *testing.T) {
 }
 
 func TestSnapshotRoundTrip_FunctionCodeClear(t *testing.T) {
-	t.Parallel()
+	// Intentionally NOT t.Parallel(): SnapshotCreator and snapshot-restore paths touch V8 process-global state that races against parallel upstream tests on the v8 14.x binaries we ship.
 
 	sc := v8.NewSnapshotCreator()
 	ctx := sc.Context()

@@ -108,6 +108,14 @@ func NewIsolate(opts ...IsolateOption) *Isolate {
 		cbs: make(map[int]FunctionCallbackWithError),
 	}
 
+	// V8 isolate construction is not concurrency-safe on the binaries we
+	// ship: parallel goroutines calling Isolate::New corrupt the
+	// process-wide shared-heap state (StringForwardingTable, ReadOnly
+	// heap, etc) and trigger fatal asserts. Serialising every
+	// construction-plus-sentinel-bootstrap keeps the wrapper safe to
+	// call from any goroutine.
+	snapshotDeserMu.Lock()
+	defer snapshotDeserMu.Unlock()
 	if len(config.snapshotBlob) > 0 {
 		// Route through the snapshot-aware constructor so the
 		// process-wide external_references array is wired in. The
@@ -213,8 +221,15 @@ func (i *Isolate) Dispose() {
 	if i.ptr == nil {
 		return
 	}
+	// Serialise dispose against snapshotDeserMu: V8 14.x corrupts its
+	// shared-heap teardown state if a parallel goroutine is constructing
+	// a new isolate at the same moment we are tearing one down. The
+	// critical section is short (microseconds) and idiomatic v8::Locker
+	// rules continue to apply for everyday API calls.
+	snapshotDeserMu.Lock()
 	C.IsolateDisposeSnapshot(i.ptr)
 	C.IsolateDispose(i.ptr)
+	snapshotDeserMu.Unlock()
 	i.ptr = nil
 	if i.snapshotData != nil {
 		C.free(i.snapshotData)

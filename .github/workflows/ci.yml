@@ -71,3 +71,152 @@ jobs:
           done
           # clang-format dry-run is advisory in this first cut; do not gate.
           echo "clang-format reported $fails non-conforming file(s); not gating."
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      - name: run tests with coverage
+        run: go test -count=1 -timeout 5m -coverprofile=coverage.out ./...
+      - name: enforce coverage threshold
+        run: |
+          total=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${total}%"
+          # Threshold is 95%: the remaining ~4-5% consists of defensive
+          # panic guards against nil C returns, GC finalizers, and
+          # process-global registry branches that cannot be reached
+          # through the public Go API.
+          if [ "$(echo "$total < 95.0" | bc)" -eq 1 ]; then
+            echo "FAIL: coverage is ${total}%, required >= 95%"
+            echo ""
+            echo "Uncovered functions:"
+            go tool cover -func=coverage.out | grep -v '100.0%'
+            exit 1
+          fi
+
+  compat-blindfox:
+    # D1: verify the v8go HEAD we are about to merge still builds and
+    # tests cleanly when dropped into blindfox. Requires a
+    # CROSS_REPO_READ_TOKEN secret with read access to
+    # ChessCom/blindfox; skips automatically on PRs from forks where
+    # the secret is not available.
+    name: compat-blindfox (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: gate on token
+        id: gate
+        env:
+          TOKEN: ${{ secrets.CROSS_REPO_READ_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "CROSS_REPO_READ_TOKEN is not configured; skipping."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=0" >> "$GITHUB_OUTPUT"
+          fi
+      - name: checkout v8go (this PR)
+        if: steps.gate.outputs.skip != '1'
+        uses: actions/checkout@v4
+        with:
+          path: v8go
+      - name: checkout blindfox @ main
+        if: steps.gate.outputs.skip != '1'
+        uses: actions/checkout@v4
+        with:
+          repository: ChessCom/blindfox
+          token: ${{ secrets.CROSS_REPO_READ_TOKEN }}
+          path: blindfox
+      - name: setup go
+        if: steps.gate.outputs.skip != '1'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+          cache-dependency-path: blindfox/go.sum
+      - name: pin blindfox to this v8go via replace
+        if: steps.gate.outputs.skip != '1'
+        working-directory: blindfox
+        run: |
+          set -e
+          # blindfox today depends on github.com/tommie/v8go via a
+          # ./third_party/v8go replace. Swap that for the PR head of
+          # ChessCom/v8go so we exercise the exact bytes about to merge.
+          go mod edit -dropreplace=github.com/tommie/v8go || true
+          go mod edit -replace="github.com/tommie/v8go=../v8go"
+          go mod tidy
+          cat go.mod | grep -E 'tommie/v8go|ChessCom/v8go' || true
+      - name: build blindfox
+        if: steps.gate.outputs.skip != '1'
+        working-directory: blindfox
+        run: go build ./...
+      - name: test blindfox (short)
+        if: steps.gate.outputs.skip != '1'
+        working-directory: blindfox
+        run: go test -short -count=1 -timeout 10m ./...
+
+  compat-er:
+    # D2: same shape as compat-blindfox but pinning er. er imports
+    # tommie/v8go directly with no replace, so the override is the
+    # only change in the go.mod.
+    name: compat-er (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: gate on token
+        id: gate
+        env:
+          TOKEN: ${{ secrets.CROSS_REPO_READ_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "CROSS_REPO_READ_TOKEN is not configured; skipping."
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=0" >> "$GITHUB_OUTPUT"
+          fi
+      - name: checkout v8go (this PR)
+        if: steps.gate.outputs.skip != '1'
+        uses: actions/checkout@v4
+        with:
+          path: v8go
+      - name: checkout er @ main
+        if: steps.gate.outputs.skip != '1'
+        uses: actions/checkout@v4
+        with:
+          repository: ChessCom/er
+          token: ${{ secrets.CROSS_REPO_READ_TOKEN }}
+          path: er
+      - name: setup go
+        if: steps.gate.outputs.skip != '1'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+          cache-dependency-path: er/go.sum
+      - name: pin er to this v8go via replace
+        if: steps.gate.outputs.skip != '1'
+        working-directory: er
+        run: |
+          set -e
+          go mod edit -replace="github.com/tommie/v8go=../v8go"
+          go mod tidy
+          cat go.mod | grep -E 'tommie/v8go|ChessCom/v8go' || true
+      - name: build er
+        if: steps.gate.outputs.skip != '1'
+        working-directory: er
+        run: go build ./...
+      - name: test er (short)
+        if: steps.gate.outputs.skip != '1'
+        working-directory: er
+        run: go test -short -count=1 -timeout 10m ./...

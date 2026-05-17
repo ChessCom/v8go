@@ -21,3 +21,11 @@ var GetContext = getContext
 func (c *Context) Ref() int {
 	return c.ref
 }
+
+// TimeUnixMicro is exported for testing only.
+var TimeUnixMicro = timeUnixMicro
+
+// SymbolValue is exported for testing the Valuer interface on Symbol.
+func SymbolValue(sym *Symbol) *Value {
+	return sym.value()
+}

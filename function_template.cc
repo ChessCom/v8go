@@ -64,6 +64,18 @@ TemplatePtr NewFunctionTemplate(IsolatePtr iso, int callback_ref) {
   ot->iso = iso;
   ot->ptr.Reset(iso,
                 FunctionTemplate::New(iso, FunctionTemplateCallback, cbData));
+
+  // Register the template with the iso-internal scaffold ONLY when
+  // template tracking is enabled (currently: SnapshotCreator-owned
+  // isolates). Tracking lets SnapshotCreator.CreateBlob Reset() every
+  // embedder Global<Template> before serialisation; doing so on every
+  // regular isolate would expose the vector to concurrent NewFunctionTemplate
+  // races and is unnecessary outside the snapshot pipeline.
+  if (auto* iso_ctx = static_cast<m_ctx*>(iso->GetData(0))) {
+    if (iso_ctx->track_templates) {
+      iso_ctx->templates.push_back(ot);
+    }
+  }
   return ot;
 }
 

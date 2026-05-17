@@ -1,89 +1,99 @@
 # Execute JavaScript from Go
 
-<a href="https://github.com/tommie/v8go/releases"><img src="https://img.shields.io/github/v/release/tommie/v8go" alt="Github release"></a>
-[![Go Report Card](https://goreportcard.com/badge/github.com/tommie/v8go)](https://goreportcard.com/report/github.com/tommie/v8go)
-[![Go Reference](https://pkg.go.dev/badge/github.com/tommie/v8go.svg)](https://pkg.go.dev/github.com/tommie/v8go)
-[![Test](https://github.com/tommie/v8go/actions/workflows/test.yml/badge.svg)](https://github.com/tommie/v8go/actions/workflows/test.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ChessCom/v8go.svg)](https://pkg.go.dev/github.com/ChessCom/v8go)
+[![ci](https://github.com/ChessCom/v8go/actions/workflows/ci.yml/badge.svg)](https://github.com/ChessCom/v8go/actions/workflows/ci.yml)
 
 <img src="gopher.jpg" width="200px" alt="V8 Gopher based on original artwork from the amazing Renee French" style="float:right" />
 
-## Relation to `rogchap.com/v8go`
+## Install
 
-This is a fork of https://github.com/rogchap/v8go at v0.9.0.
+```bash
+go get github.com/ChessCom/v8go
+```
 
-Major differences include
+**Supported platforms:** linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, android/amd64, android/arm64.
 
-* Android amd64/arm64 support.
-* Works with the new Chromium release dashboard (used to find what the stable version of V8 is).
-* Actually upgrades V8.
-  See https://github.com/rogchap/v8go/issues/399.
-* Splits the v8 static libraries to work around the [GitHub file size limit](https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github#file-size-limits) of 100 MB.
-  The splitter doesn't care about dependencies, so binutils `ld` requires `--start-group` around them.
-  Notably, the XCode `ld` doesn't care about ordering.
-* [Support](https://github.com/rogchap/v8go/pull/194) for JS Symbols.
-* [Support](https://github.com/rogchap/v8go/pull/195) for native exceptions and `FunctionCallback` returning an error.
-* A rebuilt build pipeline, being more consistent.
-  * We now build everything at once.
-    Originally, the build pipeline left the master branch inconsistent between header files and libraries of individual architectures.
-  * The library builder commits directly, without a PR, avoiding PR blow-up.
-  * Using ccache, based on https://github.com/kuoruan/libv8.
+Prebuilt V8 static libraries are included for all platforms so you should
+not need to build V8 yourself.
 
 ## Usage
 
 ```go
-import v8 "github.com/tommie/v8go"
+import v8 "github.com/ChessCom/v8go"
 ```
 
 ### Running a script
 
 ```go
-ctx := v8.NewContext() // creates a new V8 context with a new Isolate aka VM
-ctx.RunScript("const add = (a, b) => a + b", "math.js") // executes a script on the global context
-ctx.RunScript("const result = add(3, 4)", "main.js") // any functions previously added to the context can be called
-val, _ := ctx.RunScript("result", "value.js") // return a value in JavaScript back to Go
+ctx := v8.NewContext()
+ctx.RunScript("const add = (a, b) => a + b", "math.js")
+ctx.RunScript("const result = add(3, 4)", "main.js")
+val, _ := ctx.RunScript("result", "value.js")
 fmt.Printf("addition result: %s", val)
 ```
 
 ### One VM, many contexts
 
 ```go
-iso := v8.NewIsolate() // creates a new JavaScript VM
-ctx1 := v8.NewContext(iso) // new context within the VM
+iso := v8.NewIsolate()
+ctx1 := v8.NewContext(iso)
 ctx1.RunScript("const multiply = (a, b) => a * b", "math.js")
 
-ctx2 := v8.NewContext(iso) // another context on the same VM
+ctx2 := v8.NewContext(iso)
 if _, err := ctx2.RunScript("multiply(3, 4)", "main.js"); err != nil {
   // this will error as multiply is not defined in this context
 }
 ```
 
+### Snapshots for cold start
+
+V8 startup blobs let you do all the expensive parse + compile + warmup
+work once at build time and recover the resulting heap for free at
+runtime. This fork exposes both a low-level `SnapshotCreator` binding
+and a high-level Pack/Restore API.
+
+```go
+packed, err := v8.PackBundle(v8.PackOptions{
+    Source:            string(bundleJS),
+    Origin:            "bundle.js",
+    DeterministicTime: true,
+    SeedMillis:        v8.SeedTimeMillis,
+    FCH:               v8.FunctionCodeKeep,
+})
+blob, err := packed.Marshal()
+
+p, err := v8.UnmarshalPackedSnapshot(blob)
+iso, err := p.RestoreIsolate(v8.RestoreOptions{})
+ctx := v8.NewContext(iso)
+ctx.RunScript("globalThis.handle(request)", "handler.js")
+```
+
+Round-trip on a ~750 KiB synthetic bundle is roughly **3.5-6x faster**
+than re-parsing the source at boot; absolute cold-start drops from
+~15 ms to ~4 ms on M-class hardware.
+
 ### JavaScript function with Go callback
 
 ```go
-iso := v8.NewIsolate() // create a new VM
-// a template that represents a JS function
+iso := v8.NewIsolate()
 printfn := v8.NewFunctionTemplate(iso, func(info *v8.FunctionCallbackInfo) *v8.Value {
-    fmt.Printf("%v", info.Args()) // when the JS function is called this Go callback will execute
-    return nil // you can return a value back to the JS caller if required
+    fmt.Printf("%v", info.Args())
+    return nil
 })
-global := v8.NewObjectTemplate(iso) // a template that represents a JS Object
-global.Set("print", printfn) // sets the "print" property of the Object to our function
-ctx := v8.NewContext(iso, global) // new Context with the global Object set to our object template
-ctx.RunScript("print('foo')", "print.js") // will execute the Go callback with a single argunent 'foo'
+global := v8.NewObjectTemplate(iso)
+global.Set("print", printfn)
+ctx := v8.NewContext(iso, global)
+ctx.RunScript("print('foo')", "print.js")
 ```
 
 ### Update a JavaScript object from Go
 
 ```go
-ctx := v8.NewContext() // new context with a default VM
-obj := ctx.Global() // get the global object from the context
-obj.Set("version", "v1.0.0") // set the property "version" on the object
-val, _ := ctx.RunScript("version", "version.js") // global object will have the property set within the JS VM
+ctx := v8.NewContext()
+obj := ctx.Global()
+obj.Set("version", "v1.0.0")
+val, _ := ctx.RunScript("version", "version.js")
 fmt.Printf("version: %s", val)
-
-if obj.Has("version") { // check if a property exists on the object
-    obj.Delete("version") // remove the property from the object
-}
 ```
 
 ### JavaScript errors
@@ -91,35 +101,27 @@ if obj.Has("version") { // check if a property exists on the object
 ```go
 val, err := ctx.RunScript(src, filename)
 if err != nil {
-  e := err.(*v8.JSError) // JavaScript errors will be returned as the JSError struct
-  fmt.Println(e.Message) // the message of the exception thrown
-  fmt.Println(e.Location) // the filename, line number and the column where the error occurred
-  fmt.Println(e.StackTrace) // the full stack trace of the error, if available
-
-  fmt.Printf("javascript error: %v", e) // will format the standard error message
-  fmt.Printf("javascript stack trace: %+v", e) // will format the full error stack trace
+  e := err.(*v8.JSError)
+  fmt.Println(e.Message)
+  fmt.Println(e.Location)
+  fmt.Println(e.StackTrace)
 }
 ```
 
-### Pre-compile context-independent scripts to speed-up execution times
-
-For scripts that are large or are repeatedly run in different contexts,
-it is beneficial to compile the script once and used the cached data from that
-compilation to avoid recompiling every time you want to run it.
+### Pre-compile context-independent scripts
 
 ```go
 source := "const multiply = (a, b) => a * b"
-iso1 := v8.NewIsolate() // creates a new JavaScript VM
-ctx1 := v8.NewContext(iso1) // new context within the VM
-script1, _ := iso1.CompileUnboundScript(source, "math.js", v8.CompileOptions{}) // compile script to get cached data
+iso1 := v8.NewIsolate()
+ctx1 := v8.NewContext(iso1)
+script1, _ := iso1.CompileUnboundScript(source, "math.js", v8.CompileOptions{})
 val, _ := script1.Run(ctx1)
 
 cachedData := script1.CreateCodeCache()
 
-iso2 := v8.NewIsolate() // create a new JavaScript VM
-ctx2 := v8.NewContext(iso2) // new context within the VM
-
-script2, _ := iso2.CompileUnboundScript(source, "math.js", v8.CompileOptions{CachedData: cachedData}) // compile script in new isolate with cached data
+iso2 := v8.NewIsolate()
+ctx2 := v8.NewContext(iso2)
+script2, _ := iso2.CompileUnboundScript(source, "math.js", v8.CompileOptions{CachedData: cachedData})
 val, _ = script2.Run(ctx2)
 ```
 
@@ -130,7 +132,7 @@ vals := make(chan *v8.Value, 1)
 errs := make(chan error, 1)
 
 go func() {
-    val, err := ctx.RunScript(script, "forever.js") // exec a long running script
+    val, err := ctx.RunScript(script, "forever.js")
     if err != nil {
         errs <- err
         return
@@ -139,21 +141,18 @@ go func() {
 }()
 
 select {
-case val := <- vals:
+case val := <-vals:
     // success
-case err := <- errs:
+case err := <-errs:
     // javascript error
-case <- time.After(200 * time.Milliseconds):
-    vm := ctx.Isolate() // get the Isolate from the context
-    vm.TerminateExecution() // terminate the execution
-    err := <- errs // will get a termination error back from the running script
+case <-time.After(200 * time.Milliseconds):
+    vm := ctx.Isolate()
+    vm.TerminateExecution()
+    err := <-errs
 }
 ```
 
 ### Setting memory limits
-V8 supports setting a hard limit on Javascript memory usage.
-To do so, add a call to `WithResourceConstraints` to the `NewIsolate` invocation.
-If the limit is hit, this results in a call to `TerminateExecution` as shown above.
 
 ```go
 vm := v8.NewIsolate(v8.WithResourceConstraints(8*1024*1024, 16*1024*1024))
@@ -171,174 +170,144 @@ val, err = ctx.RunScript(`
 ### CPU Profiler
 
 ```go
-func createProfile() {
-	iso := v8.NewIsolate()
-	ctx := v8.NewContext(iso)
-	cpuProfiler := v8.NewCPUProfiler(iso)
+iso := v8.NewIsolate()
+ctx := v8.NewContext(iso)
+cpuProfiler := v8.NewCPUProfiler(iso)
 
-	cpuProfiler.StartProfiling("my-profile")
+cpuProfiler.StartProfiling("my-profile")
+ctx.RunScript(profileScript, "script.js")
+val, _ := ctx.Global().Get("start")
+fn, _ := val.AsFunction()
+fn.Call(ctx.Global())
+cpuProfile := cpuProfiler.StopProfiling("my-profile")
 
-	ctx.RunScript(profileScript, "script.js") # this script is defined in cpuprofiler_test.go
-	val, _ := ctx.Global().Get("start")
-	fn, _ := val.AsFunction()
-	fn.Call(ctx.Global())
-
-	cpuProfile := cpuProfiler.StopProfiling("my-profile")
-
-	printTree("", cpuProfile.GetTopDownRoot()) # helper function to print the profile
-}
-
-func printTree(nest string, node *v8.CPUProfileNode) {
-	fmt.Printf("%s%s %s:%d:%d\n", nest, node.GetFunctionName(), node.GetScriptResourceName(), node.GetLineNumber(), node.GetColumnNumber())
-	count := node.GetChildrenCount()
-	if count == 0 {
-		return
-	}
-	nest = fmt.Sprintf("%s  ", nest)
-	for i := 0; i < count; i++ {
-		printTree(nest, node.GetChild(i))
-	}
-}
-
-// Output
-// (root) :0:0
-//   (program) :0:0
-//   start script.js:23:15
-//     foo script.js:15:13
-//       delay script.js:12:15
-//         loop script.js:1:14
-//       bar script.js:13:13
-//         delay script.js:12:15
-//           loop script.js:1:14
-//       baz script.js:14:13
-//         delay script.js:12:15
-//           loop script.js:1:14
-//   (garbage collector) :0:0
+printTree("", cpuProfile.GetTopDownRoot())
 ```
+
+## Origin: from Blindfox to v8go
+
+This library grew out of [Blindfox](https://github.com/ChessCom/blindfox),
+Chess.com's Go-native headless browser and SSR engine.
+
+**January 2026** -- Blindfox was created as a Go reverse proxy with
+HTMLRewriter-based SSR for chess.com, starting from a Cloudflare Worker
+concept and quickly evolving into a full parallel-rendering SSR engine.
+
+**February 2026** -- V8go was introduced into Blindfox as an optional
+JavaScript runtime alongside Sobek (a pure-Go JS engine). The V8
+backend provided the fidelity needed for production Vue SSR where
+Sobek's ES2015+ gaps caused rendering failures.
+
+**April 2026** -- Blindfox's headless CDP browser was born, using V8go
+as the primary execution engine. This Chrome DevTools Protocol server
+let Playwright connect via `connectOverCDP()` and drive pages through
+JavaScript evaluation, DOM manipulation, network interception, and
+keyboard/mouse input -- all without Chromium. By mid-April the chess.com
+login Playwright suite passed 36/36 tests, and self-contained API
+coverage reached 150/150 across 37 Playwright categories.
+
+**May 2026** -- The V8go dependency was upgraded from rogchap/v8go v0.9.0
+to tommie/v8go v0.34.0 (V8 13.6), unlocking modern V8 features like
+improved snapshot support and compilation caching. Shortly after, the
+SnapshotCreator bindings, Pack/Restore API, and deterministic snapshot
+mode were developed to eliminate cold-start overhead for Blindfox's
+per-request isolate model.
+
+**ChessCom/v8go** was extracted as a standalone fork of tommie/v8go so
+the snapshot and concurrency improvements could be published, versioned,
+and consumed independently by any Go project -- not just Blindfox.
+
+## Fork additions
+
+This is the ChessCom fork of [tommie/v8go](https://github.com/tommie/v8go),
+which itself is a fork of [rogchap/v8go](https://github.com/rogchap/v8go)
+at v0.9.0.
+
+The ChessCom fork adds:
+
+* **`v8::SnapshotCreator` bindings** -- produce V8 startup blobs from Go
+  with full support for `external_references` (Go-backed
+  `FunctionTemplate` callbacks).
+* **High-level Pack/Restore API** -- versioned snapshot envelope with
+  V8 ABI + external-references digest validation so a stale or
+  corrupt blob is rejected before V8 ever sees it.
+* **Deterministic snapshot mode** -- pin `Date.now`, `Math.random`,
+  and `performance.now` to a seed so snapshot inputs are reproducible.
+* **Concurrency-safe wrapper** -- process-wide serialisation of
+  isolate construction/disposal and thread-pinning for
+  `SnapshotCreator`, working around V8 14.x process-state fragility.
+
+## Versioning
+
+Tags follow `vMAJOR.MINOR.PATCH-chess.N`. The first release tracking
+this fork is `v0.34.0-chess.0` (mirroring `tommie/v8go@v0.34.0` plus
+the changes above).
+
+## V8 dependency
+
+See `deps/v8/` for the version of V8 currently in use. Prebuilt static
+libraries of V8 are included for Linux and macOS so you should not need
+to build V8 yourself.
 
 ## Documentation
 
-Go Reference & more examples: https://pkg.go.dev/github.com/tommie/v8go
+| Document | Description |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | Internal design: object model, CGO bridge, snapshot system, concurrency |
+| [docs/performance.md](docs/performance.md) | Cold-start benchmarks, memory, deterministic snapshots, sizing |
+| [docs/api-reference.md](docs/api-reference.md) | Comprehensive API reference with code examples |
+| [docs/zero-cold-start.md](docs/zero-cold-start.md) | Exploring techniques for true zero cold start |
+| [docs/MAINTAINING.md](docs/MAINTAINING.md) | Fork maintenance: upstream sync, V8 upgrades, downstream compat |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
 
-### Support
+## Development
 
-If you would like to ask questions about this library or want to keep up-to-date with the latest changes and releases,
-please join the [**#v8go**](https://gophers.slack.com/channels/v8go) channel on Gophers Slack. [Click here to join the Gophers Slack community!](https://invite.slack.golangbridge.org/)
+### Building from source
 
-### Windows
+```bash
+git clone https://github.com/ChessCom/v8go.git
+cd v8go
+go build ./...
+go test -count=1 -timeout 5m ./...
+```
 
-There used to be Windows binary support. For further information see, [rogchap PR #234](https://github.com/rogchap/v8go/pull/234).
+### Debug builds
 
-The v8go library would welcome contributions from anyone able to get an external windows
-build of the V8 library linking with v8go, using the version of V8 checked out in the
-`deps/v8` git submodule, and documentation of the process involved. This process will likely
-involve passing a linker flag when building v8go (e.g. using the `CGO_LDFLAGS` environment
-variable.
+To build V8 with debug info and assertions:
 
-## V8 Dependency
+1. `git submodule update --init --recursive`
+2. `deps/build.py --debug`
+3. `go test -c -ldflags=-compressdwarf=false`
+4. `lldb -- ./v8go.test -test.run TestThatIsCrashing`
 
-See `deps/v8/` for the version of V8 we're currently on.
-In order to make `v8go` usable as a standard Go package, prebuilt static libraries of V8 are included for Linux and macOS. you *should not* require to build V8 yourself.
+### Formatting
 
-## Project Goals
+Go files: `go fmt`
+C/C++ files: `clang-format --style=Chromium` (run via `go generate`)
 
-To provide a high quality, idiomatic, Go binding to the [V8 C++ API](https://v8.github.io/api/head/index.html).
+### Leak checking
 
-The API should match the original API as closely as possible, but with an API that Gophers (Go enthusiasts) expect. For
-example: using multiple return values to return both result and error from a function, rather than throwing an
-exception.
+```bash
+CC=clang CXX=clang++ go test -c --tags leakcheck && ./v8go.test
+```
 
-This project also aims to keep up-to-date with the latest (stable) release of V8.
+On macOS with homebrew llvm:
+
+```bash
+CXX=$HOMEBREW_PREFIX/opt/llvm/bin/clang++ CC=$HOMEBREW_PREFIX/opt/llvm/bin/clang \
+  go test -c --tags leakcheck -ldflags=-compressdwarf=false
+ASAN_OPTIONS=detect_leaks=1 ./v8go.test
+```
+
+## Upstream relationship
+
+This repository tracks [tommie/v8go](https://github.com/tommie/v8go)
+as its upstream. A weekly [GitHub Actions workflow](.github/workflows/upstream-sync.yml)
+checks for new upstream commits and opens a merge PR automatically.
 
 ## License
 
 [![FOSSA Status](https://app.fossa.com/api/projects/custom%2B22862%2Fgit%40github.com%3Atommie%2Fv8go.git.svg?type=large)](https://app.fossa.com/projects/custom%2B22862%2Fgit%40github.com%3Atommie%2Fv8go.git?ref=badge_large)
-
-## Development
-
-### Recompile V8 with debug info and debug checks
-
-[Aside from data races, Go should be memory-safe](https://research.swtch.com/gorace) and v8go should preserve this property by adding the necessary checks to return an error or panic on these unsupported code paths. Release builds of v8go don't include debugging information for the V8 library since it significantly adds to the binary size, slows down compilation and shouldn't be needed by users of v8go. However, if a v8go bug causes a crash (e.g. during new feature development) then it can be helpful to build V8 with debugging information to get a C++ backtrace with line numbers. The following steps will not only do that, but also enable V8 debug checking, which can help with catching misuse of the V8 API.
-
-1) Make sure to clone the projects submodules (ie. the V8's `depot_tools` project): `git submodule update --init --recursive`
-1) Build the V8 binary for your OS: `deps/build.py --debug`. V8 is a large project, and building the binary can take up to 30 minutes.
-1) Build the executable to debug, using `go build` for commands or `go test -c` for tests. You may need to add the `-ldflags=-compressdwarf=false` option to disable debug information compression so this information can be read by the debugger (e.g. lldb that comes with Xcode v12.5.1, the latest Xcode released at the time of writing)
-1) Run the executable with a debugger (e.g. `lldb -- ./v8go.test -test.run TestThatIsCrashing`, `run` to start execution then use `bt` to print a bracktrace after it breaks on a crash), since backtraces printed by Go or V8 don't currently include line number information.
-
-### Upgrading the V8 binaries
-
-We have the [v8upgrade](https://github.com/tommie/v8go/.github/workflow/v8upgrade.yml) workflow.
-The workflow is triggered every day or manually.
-When run, it finds the current stable V8 version on https://chromiumdash.appspot.com/.
-If the new version is different from `deps/v8_hash`, it runs `v8build` and `release`.
-
-The [v8build](https://github.com/tommie/v8go/.github/workflow/v8build.yml) workflow upgrades V8 and builds the libraries.
-It is triggered by the `v8upgrade` workflow, or being run manually.
-Each architecture is a separate job, storing build artifacts that are picked up by the Commit job.
-This job updates the master branch.
-Then it runs `syncsubdeps`.
-
-The [syncsubdeps](https://github.com/tommie/v8go/.github/workflow/syncsubdeps.yml) workflow updates the `go.mod` file to point to the new commit.
-Each architecture in `deps/` is its own Go module.
-This is needed to work around size constraints in Go module handling due to the large libv8 files.
-But we still want them to be consistent across builds, something that needs to happen after the built files have been committed.
-Once this is done, the upgrade is complete.
-
-Releasing the library is a matter of running the [release](https://github.com/tommie/v8go/.github/workflow/release.yml) workflow.
-It reads `CHANGELOG.md`, creates a Git tag and a GitHub release.
-The tag is what matters for Go modules, and the GitHub release is useful for notifications.
-Releases happen automatically for upgrades.
-
-### Flushing after C/C++ standard library printing for debugging
-
-When using the C/C++ standard library functions for printing (e.g. `printf`), then the output will be buffered by default.
-This can cause some confusion, especially because the test binary (created through `go test`) does not flush the buffer
-at exit (at the time of writing). When standard output is the terminal, then it will use line buffering and flush when
-a new line is printed, otherwise (e.g. if the output is redirected to a pipe or file) it will be fully buffered and not even
-flush at the end of a line. When the test binary is executed through `go test .` (e.g. instead of
-separately compiled with `go test -c` and run with `./v8go.test`) Go may redirect standard output internally, resulting in
-standard output being fully buffered.
-
-A simple way to avoid this problem is to flush the standard output stream after printing with the `fflush(stdout);` statement.
-Not relying on the flushing at exit can also help ensure the output is printed before a crash.
-
-### Local leak checking
-
-Leak checking is automatically done in CI, but it can be useful to do locally to debug leaks.
-
-Leak checking is done using the [Leak Sanitizer](https://clang.llvm.org/docs/LeakSanitizer.html) which
-is a part of LLVM. As such, compiling with clang as the C/C++ compiler seems to produce more complete
-backtraces (unfortunately still only of the system stack at the time of writing).
-
-For instance, on a Debian-based Linux system, you can use `sudo apt-get install clang-12` to install a
-recent version of clang.  Then CC and CXX environment variables are needed to use that compiler. With
-that compiler, the tests can be run as follows
-
-```
-CC=clang-12 CXX=clang++-12 go test -c --tags leakcheck && ./v8go.test
-```
-
-The separate compile and link commands are currently needed to get line numbers in the backtrace.
-
-On macOS, leak checking isn't available with the version of clang that comes with Xcode, so a separate
-compiler installation is needed.  For example, with homebrew, `brew install llvm` will install a version
-of clang with support for this. The ASAN_OPTIONS environment variable will also be needed to run the code
-with leak checking enabled, since it isn't enabled by default on macOS. E.g. with the homebrew
-installation of llvm, the tests can be run with
-
-```
-CXX=$HOMEBREW_PREFIX/opt/llvm/bin/clang++ CC=$HOMEBREW_PREFIX/opt/llvm/bin/clang go test -c --tags leakcheck -ldflags=-compressdwarf=false
-ASAN_OPTIONS=detect_leaks=1 ./v8go.test
-```
-
-The `-ldflags=-compressdwarf=false` is currently (with clang 13) needed to get line numbers in the backtrace.
-
-### Formatting
-
-Go has `go fmt`, C has `clang-format`. Any changes to the `v8go.h|cc` should be formated with `clang-format` with the
-"Chromium" Coding style. This can be done easily by running the `go generate` command.
-
-`brew install clang-format` to install on macOS.
 
 ---
 

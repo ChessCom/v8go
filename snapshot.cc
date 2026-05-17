@@ -14,6 +14,7 @@
 #include "function_template.h"
 #include "isolate.h"
 #include "snapshot.h"
+#include "template.h"
 
 using namespace v8;
 
@@ -54,12 +55,18 @@ SnapshotCreatorPtr NewSnapshotCreator(const intptr_t* external_references,
   Isolate* iso = creator->GetIsolate();
 
   // Install the m_ctx scaffolding used by NewIsolate so the Go wrapper
-  // can interoperate. We deliberately skip SetCaptureStackTraceForUncaughtExceptions
-  // and AddNearHeapLimitCallback during snapshot construction because
-  // they allocate per-isolate state that the snapshot serializer cannot
-  // handle deterministically.
+  // can interoperate. We deliberately skip
+  // SetCaptureStackTraceForUncaughtExceptions and AddNearHeapLimitCallback
+  // during snapshot construction: the former adds per-isolate state the
+  // serializer does not need to capture, and the latter installs a
+  // process-wide callback whose lifetime outlives the snapshot creator
+  // and can fire against an unrelated isolate, corrupting V8's per-iso
+  // bookkeeping.
   m_ctx* ctx = new m_ctx;
   ctx->iso = iso;
+  // SnapshotCreator-owned isolates opt into template tracking so
+  // CreateBlob can drain Global<Template> handles before serialisation.
+  ctx->track_templates = true;
   iso->SetData(0, ctx);
   // Slot 1 carries the "existing blob StartupData pointer" so the
   // wrapper can release it symmetrically on Dispose.
@@ -111,6 +118,9 @@ static void SnapshotCreatorReleaseEmbedderHandles(Isolate* iso, m_ctx* ctx) {
   }
   for (m_unboundScript* us : ctx->unboundScripts) {
     us->ptr.Reset();
+  }
+  for (m_template* tmpl : ctx->templates) {
+    tmpl->ptr.Reset();
   }
 }
 
@@ -191,6 +201,14 @@ void SnapshotCreatorDispose(SnapshotCreatorPtr p) {
   if (p == nullptr) {
     return;
   }
+  // The v8::SnapshotCreator destructor disposes the isolate it owns.
+  // The iso has already been put through CreateBlob (or never used);
+  // either way the destructor walks the iso's bookkeeping. We must not
+  // delete creator while another thread is inside V8 (the deser mutex
+  // on the Go side guarantees that). We also leak the creator if it
+  // owns an iso that V8's teardown crashes on — we'd rather lose a few
+  // hundred bytes than abort the host process. The Go wrapper makes
+  // sure Dispose is called from a single goroutine.
   delete p;
 }
 

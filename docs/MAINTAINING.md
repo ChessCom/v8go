@@ -1,0 +1,151 @@
+# Maintaining the ChessCom/v8go fork
+
+This document describes the ongoing maintenance burden of keeping this
+fork alive and in sync with its upstream, [tommie/v8go](https://github.com/tommie/v8go).
+
+## Upstream synchronisation
+
+A weekly GitHub Actions workflow
+([upstream-sync.yml](../.github/workflows/upstream-sync.yml)) fetches
+`tommie/v8go` master every Monday at 06:00 UTC and opens a merge PR
+when new commits are found. The PR title includes the commit count so
+reviewers know whether it is a trivial bump or a V8-version upgrade.
+
+### What to expect
+
+| Upstream change type | Typical effort |
+|---|---|
+| Test-only or doc-only | Auto-merge after CI passes |
+| Go API additions | Review for compatibility with our downstream consumers |
+| V8 minor version bump (13.6 → 13.7) | Rebuild deps modules, re-run snapshot tests, validate ABI stability |
+| V8 major version bump (13.x → 14.x) | Likely merge conflicts in fork-specific C++; full regression pass on blindfox and er |
+| C++ header restructuring | Manual resolution of `snapshot.{h,cc}` and `isolate.{h,cc}` conflicts |
+
+### Resolving merge conflicts
+
+The fork-specific C++ files are the most common source of conflicts:
+
+| Fork file | Upstream counterpart | Why they conflict |
+|---|---|---|
+| `snapshot.h` / `snapshot.cc` | _does not exist upstream_ | Upstream may rename or restructure headers that `snapshot.cc` includes |
+| `isolate.h` / `isolate.cc` | same | Fork adds `SnapshotCreatorPtr` typedefs and isolate construction helpers |
+| `v8go.h` / `v8go.cc` | same | Fork registers additional C exports for the snapshot bridge |
+
+When conflicts appear, resolve them locally, ensure the CI matrix
+passes on both ubuntu-latest and macos-latest, and push to the sync
+branch. If conflicts are non-trivial, tag a second reviewer.
+
+### Skipping a sync
+
+Occasionally an upstream merge introduces a V8 binary change that is
+not yet mirrored in the deps modules. In that case, close the
+automated PR with a comment explaining the skip and reopen manually
+once the deps are updated.
+
+## V8 binary upgrades
+
+The prebuilt `libv8.a` static libraries live in the deps submodules
+(`tommie/v8go/deps/linux_x86_64`, `tommie/v8go/deps/darwin_arm64`,
+etc.). When upstream bumps the V8 version:
+
+1. The deps modules are republished with new binaries.
+2. `go.sum` picks up the new hashes on `go mod tidy`.
+3. Every CGO call site must be re-validated: the V8 C++ API is not
+   ABI-stable across versions, and header renames or signature changes
+   can break compilation.
+4. Snapshot blobs are version-locked — a blob produced by V8 13.6
+   cannot be loaded by V8 13.7. The `PackedSnapshot.V8ABI` field
+   catches this at runtime, but any cached blobs in production must be
+   regenerated after an upgrade.
+
+### Verification checklist
+
+- [ ] `go build ./...` passes on linux/amd64 and darwin/arm64
+- [ ] `go test -count=1 -timeout 5m ./...` passes on both platforms
+- [ ] `snapshot_bench_test.go` benchmarks complete without assertion failures
+- [ ] `compat-blindfox` and `compat-er` CI jobs pass
+
+## CGO surface drift
+
+The fork extends the upstream C bridge with snapshot-related functions.
+These are the fork-specific C exports (in `snapshot.h` / `snapshot.cc`):
+
+- `NewSnapshotCreator`
+- `SnapshotCreatorGetIsolate`
+- `SnapshotCreatorAddContext`
+- `SnapshotCreatorCreateBlob`
+- `SnapshotCreatorDispose`
+- `SnapshotCreatorFreeBlob`
+
+And the fork-modified exports (in `isolate.h` / `v8go.cc`):
+
+- `NewIsolateFromSnapshot` — extended to accept snapshot startup data
+- `SnapshotCreatorPtr` typedef
+
+When upstream modifies the signatures of existing C exports (e.g.
+`NewIsolate`, `IsolateDispose`), the fork-specific additions must be
+re-aligned. Grep for `// ChessCom:` comments in C++ files to locate
+fork-specific modifications quickly.
+
+## Downstream compatibility
+
+Two internal repositories depend on this fork:
+
+| Downstream | Import path | How it consumes v8go |
+|---|---|---|
+| **blindfox** | `github.com/tommie/v8go` (via `replace`) | V8 isolate management, snapshot creation, DOM JS execution |
+| **er** | `github.com/tommie/v8go` (via `replace`) | Lightweight JS evaluation |
+
+### CI guardrails
+
+The `ci.yml` workflow includes `compat-blindfox` and `compat-er` jobs
+that check out the downstream repo, swap its v8go dependency to the PR
+head via `go mod edit -replace`, and run `go build` + `go test -short`.
+This catches API breakage before it reaches main.
+
+Both jobs require the `CROSS_REPO_READ_TOKEN` secret. Without it they
+skip gracefully — useful for external PRs from forks.
+
+### Automatic downstream bumps
+
+The `auto-bump-downstreams.yml` workflow opens PRs against blindfox
+and er when a new commit lands on main. It is currently gated to
+`workflow_dispatch`; flip the trigger to `push: branches: [main]`
+once both downstreams import `github.com/ChessCom/v8go` directly.
+
+## Release process
+
+Tags follow `vMAJOR.MINOR.PATCH-chess.N` (e.g. `v0.34.0-chess.0`),
+where `MAJOR.MINOR.PATCH` mirrors the upstream `tommie/v8go` version
+and `-chess.N` increments for each ChessCom change set.
+
+1. Update `CHANGELOG.md` with a new section.
+2. `git tag vX.Y.Z-chess.N && git push origin vX.Y.Z-chess.N`.
+3. Trigger **auto-bump-downstreams** to open PRs in blindfox and er.
+
+## Repository secrets
+
+| Secret | Used by | Scope |
+|---|---|---|
+| `CROSS_REPO_READ_TOKEN` | `compat-blindfox`, `compat-er` in `ci.yml` | `repo:read` on ChessCom/blindfox and ChessCom/er |
+| `CROSS_REPO_WRITE_TOKEN` | `auto-bump-downstreams.yml` | `repo:write` (PR open) on ChessCom/blindfox and ChessCom/er |
+
+Both should be fine-scoped GitHub App tokens (preferred) or PATs with
+the minimum scopes above. Workflow jobs auto-skip when the secret is
+missing, so PRs from forks degrade gracefully.
+
+To rotate: create a new token with the same scopes, paste it into
+**Settings > Secrets and variables > Actions** under the matching name,
+and delete the old one.
+
+## Branch protection
+
+Configure under **Settings > Branches > main** with:
+
+- Require a pull request before merging (1 approval)
+- Dismiss stale approvals on new commits
+- Required status checks: `unit (ubuntu-latest)`, `unit (macos-latest)`,
+  `vet`, `coverage`
+- Optional (when token is set): `compat-blindfox (*)`, `compat-er (*)`
+- Require branches to be up to date before merging
+- Restrict pushes to maintainers only

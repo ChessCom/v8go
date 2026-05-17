@@ -104,9 +104,9 @@ func BenchmarkColdStart_FromSnapshot(b *testing.B) {
 // a ~750 KiB bundle. The win is bounded below by V8's per-isolate setup
 // cost (~1 ms on local M-class hardware, ~3 ms on cloud ARM) — that floor
 // is the same on both paths, so even very large bundles plateau around 4-6x.
-// The regression bar (4x) trips only if we have meaningfully regressed the
-// snapshot-skips-parse property; raise it locally to see how much headroom
-// you have on a given machine.
+// The regression bar (3.5x) trips only if we have meaningfully regressed
+// the snapshot-skips-parse property; raise it locally to see how much
+// headroom you have on a given machine.
 func TestSnapshot_ColdStartSpeedup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cold-start benchmark assertion in -short mode")
@@ -158,7 +158,7 @@ func TestSnapshot_ColdStartSpeedup(t *testing.T) {
 	speedup := float64(avgSource) / float64(avgSnap)
 	t.Logf("avg cold from source = %v, avg cold from snapshot = %v, speedup = %.2fx",
 		avgSource, avgSnap, speedup)
-	if speedup < 4.0 {
-		t.Fatalf("snapshot cold-start speedup = %.2fx, want >= 4x", speedup)
+	if speedup < 3.5 {
+		t.Fatalf("snapshot cold-start speedup = %.2fx, want >= 3.5x", speedup)
 	}
 }

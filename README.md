@@ -271,6 +271,7 @@ to build V8 yourself.
 | [docs/api-reference.md](docs/api-reference.md) | Comprehensive API reference with code examples |
 | [docs/zero-cold-start.md](docs/zero-cold-start.md) | Exploring techniques for true zero cold start |
 | [docs/maintaining.md](docs/maintaining.md) | Fork maintenance: upstream sync, V8 upgrades, downstream compat |
+| [docs/release.md](docs/release.md) | Release flow, versioning, consumer integration |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## Development

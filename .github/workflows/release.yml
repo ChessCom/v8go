@@ -1,0 +1,102 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: validate tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: check tag format
+        id: check
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          echo "tag=$tag"
+          if ! echo "$tag" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+-chess\.[0-9]+$'; then
+            echo "::error::Tag '$tag' does not match vX.Y.Z-chess.N format"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: ci (${{ matrix.os }})
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      - name: build
+        run: go build ./...
+      - name: test
+        run: go test -count=1 -timeout 5m ./...
+
+  coverage:
+    name: coverage
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      - name: test with coverage
+        run: go test -count=1 -timeout 5m -coverprofile=coverage.out ./...
+      - name: enforce threshold
+        run: |
+          total=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | tr -d '%')
+          echo "Total coverage: ${total}%"
+          if [ "$(echo "$total < 95.0" | bc)" -eq 1 ]; then
+            echo "FAIL: coverage ${total}% < 95%"
+            exit 1
+          fi
+
+  release:
+    name: github release
+    needs: [validate, ci, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: extract release notes
+        id: notes
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          # Extract the CHANGELOG section for this version.
+          # Matches from "## vX.Y.Z-chess.N" to the next "## " header.
+          tag_escaped=$(echo "$VERSION" | sed 's/\./\\./g')
+          notes=$(awk "/^## ${tag_escaped}/ { found=1; next } /^## / { if(found) exit } found { print }" CHANGELOG.md)
+          if [ -z "$notes" ]; then
+            notes="Release ${VERSION}. See [CHANGELOG.md](CHANGELOG.md) for details."
+          fi
+          # Write to file to avoid quoting issues
+          echo "$notes" > /tmp/release-notes.md
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate.outputs.version }}
+          name: ${{ needs.validate.outputs.version }}
+          body_path: /tmp/release-notes.md
+          draft: false
+          prerelease: false
+
+  bump-downstreams:
+    name: bump downstreams
+    needs: [validate, release]
+    uses: ./.github/workflows/auto-bump-downstreams.yml
+    secrets: inherit

@@ -107,6 +107,9 @@ func TestSnapshot_ColdStartSpeedup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping cold-start benchmark assertion in -short mode")
 	}
+	if testing.CoverMode() != "" {
+		t.Skip("skipping cold-start benchmark under coverage profiling (instrumentation overhead distorts timings)")
+	}
 
 	const iters = 6 // average a few rounds to smooth jitter
 	sourceTotal := time.Duration(0)

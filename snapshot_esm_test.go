@@ -808,6 +808,9 @@ func TestSnapshotESM_ColdStartSpeedup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping ESM cold-start benchmark in -short mode")
 	}
+	if testing.CoverMode() != "" {
+		t.Skip("skipping cold-start benchmark under coverage profiling (instrumentation overhead distorts timings)")
+	}
 
 	// ~15000 exported arrow functions + coordinator to generate ~750KiB
 	// of source where V8 parse + compile dominates cold-start.

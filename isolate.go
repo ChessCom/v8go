@@ -27,8 +27,12 @@ type Isolate struct {
 
 	nearHeapLimitCB NearHeapLimitCallback
 	promiseRejectCB PromiseRejectCallback
+	oomErrorCB      OOMErrorCallback
 	gcPrologueCBs   []GCCallback
 	gcEpilogueCBs   []GCCallback
+
+	interceptorSeq int
+	interceptors   map[int]*interceptorCallbacks
 }
 
 // HeapStatistics represents V8 isolate heap statistics
@@ -217,6 +221,44 @@ func (i *Isolate) ContextDisposedNotification(dependantContext bool) {
 	C.IsolateContextDisposedNotification(i.ptr, C.int(dep))
 }
 
+// AdjustExternalMemory reports Go-side allocations to V8's GC heuristic.
+// Positive values tell V8 that external memory increased; negative values
+// tell it external memory decreased. Returns the new total external memory
+// estimate. Every positive adjustment must eventually be balanced by a
+// matching negative adjustment, or V8's bookkeeping will skew.
+func (i *Isolate) AdjustExternalMemory(changeInBytes int64) int64 {
+	return int64(C.IsolateAdjustExternalMemory(i.ptr, C.int64_t(changeInBytes)))
+}
+
+// MicrotasksPolicy controls when V8 drains its microtask queue.
+type MicrotasksPolicy int
+
+const (
+	// MicrotasksPolicyExplicit requires the embedder to call
+	// PerformMicrotaskCheckpoint manually.
+	MicrotasksPolicyExplicit MicrotasksPolicy = 0
+	// MicrotasksPolicyScoped drains microtasks at MicrotasksScope boundaries.
+	MicrotasksPolicyScoped MicrotasksPolicy = 1
+	// MicrotasksPolicyAuto drains microtasks automatically at script-exit.
+	MicrotasksPolicyAuto MicrotasksPolicy = 2
+)
+
+// SetMicrotasksPolicy controls when V8 drains the microtask queue.
+// The default is MicrotasksPolicyExplicit which requires the embedder
+// to call PerformMicrotaskCheckpoint. MicrotasksPolicyAuto drains
+// microtasks automatically at every script-exit boundary.
+func (i *Isolate) SetMicrotasksPolicy(policy MicrotasksPolicy) {
+	C.IsolateSetMicrotasksPolicy(i.ptr, C.int(policy))
+}
+
+// EnqueueMicrotask schedules a JavaScript function to run as a microtask.
+// The function will execute on the next microtask checkpoint (manual or
+// automatic depending on the microtask policy). This bypasses the JS-side
+// Promise.resolve().then(fn) pattern, saving one promise allocation.
+func (i *Isolate) EnqueueMicrotask(fn *Function) {
+	C.IsolateEnqueueMicrotask(i.ptr, fn.ptr)
+}
+
 type CompileOptions struct {
 	CachedData *CompilerCachedData
 
@@ -340,4 +382,22 @@ func (i *Isolate) getCallback(ref int) FunctionCallbackWithError {
 	i.cbMutex.RLock()
 	defer i.cbMutex.RUnlock()
 	return i.cbs[ref]
+}
+
+func (i *Isolate) registerInterceptor(icb *interceptorCallbacks) int {
+	i.cbMutex.Lock()
+	if i.interceptors == nil {
+		i.interceptors = make(map[int]*interceptorCallbacks)
+	}
+	i.interceptorSeq++
+	ref := i.interceptorSeq
+	i.interceptors[ref] = icb
+	i.cbMutex.Unlock()
+	return ref
+}
+
+func (i *Isolate) getInterceptor(ref int) *interceptorCallbacks {
+	i.cbMutex.RLock()
+	defer i.cbMutex.RUnlock()
+	return i.interceptors[ref]
 }

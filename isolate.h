@@ -77,6 +77,12 @@ extern void IsolateCancelTerminateExecution(IsolatePtr ptr);
 extern void IsolateRequestGarbageCollectionForTesting(IsolatePtr ptr, int type);
 extern void IsolateContextDisposedNotification(IsolatePtr ptr, int dependant_context);
 
+// ChessCom: Wave 3 — cooperative GC, microtasks, external memory
+extern int64_t IsolateAdjustExternalMemory(IsolatePtr ptr,
+                                           int64_t change_in_bytes);
+extern void IsolateSetMicrotasksPolicy(IsolatePtr ptr, int policy);
+extern void IsolateEnqueueMicrotask(IsolatePtr ptr, ValuePtr fn_ptr);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

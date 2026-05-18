@@ -562,12 +562,6 @@ void SetFlags(const char* flags) {
 
 /********** SharedArrayBuffer & BackingStore ***********/
 
-struct v8BackingStore {
-  v8BackingStore(std::shared_ptr<v8::BackingStore>&& ptr)
-      : backing_store{ptr} {}
-  std::shared_ptr<v8::BackingStore> backing_store;
-};
-
 BackingStorePtr SharedArrayBufferGetBackingStore(ValuePtr ptr) {
   LOCAL_VALUE(ptr);
   auto buffer = Local<SharedArrayBuffer>::Cast(value);

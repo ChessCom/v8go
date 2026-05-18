@@ -120,6 +120,47 @@ The fork extends the upstream C bridge across several areas.
 - `IsolateRequestInterruptTerminate` — schedules termination via interrupt
 - `IsolateSetIdle` — hints idle state to V8
 
+### External memory and microtask control (`isolate.h` / `isolate.cc`)
+
+- `IsolateAdjustExternalMemory` — reports Go-side allocations to V8's GC heuristic
+- `IsolateSetMicrotasksPolicy` — controls microtask queue drain policy (Explicit/Scoped/Auto)
+- `IsolateEnqueueMicrotask` — schedules a JS function as a microtask
+
+### OOM error handler (`oom_handler.h` / `oom_handler.cc`)
+
+- `IsolateSetOOMErrorHandler` — installs a Go callback for V8 out-of-memory events
+- `IsolateClearOOMErrorHandler` — restores default abort-on-OOM behavior
+
+### ArrayBuffer (`arraybuffer.h` / `arraybuffer.cc`)
+
+- `NewArrayBufferFromBytes` — creates ArrayBuffer with copied data
+- `NewArrayBufferAlloc` — allocates empty ArrayBuffer in V8 sandbox
+- `ArrayBufferGetData` / `ArrayBufferGetByteLength` / `ArrayBufferGetBackingStore` — accessors
+
+### External strings (`external_string.h` / `external_string.cc`)
+
+- `NewExternalOneByteString` — creates string backed by external Go memory
+
+### Named property interceptors (`interceptor.h` / `interceptor.cc`)
+
+- `ObjectTemplateSetNamedPropertyHandler` — installs getter/setter interceptors
+- Uses callback registry pattern via `Integer` data (same as FunctionTemplate)
+
+### Heap profiler (`heap_profiler.h` / `heap_profiler.cc`)
+
+- `IsolateTakeHeapSnapshot` — captures heap snapshot as JSON
+- `HeapSnapshotDataFree` — frees the C-allocated snapshot buffer
+
+### ES Modules (`module.h` / `module.cc`)
+
+- `CompileESModule` — compiles ES module source
+- `ModuleInstantiate` — instantiates with resolve callback trampoline
+- `ModuleEvaluate` — evaluates the module
+- `ModuleGetStatus` / `ModuleGetRequestsLength` / `ModuleGetRequest` — introspection
+- `ModuleGetNamespace` — returns module namespace object
+- `ModuleGetIdentityHash` — identity hash for module map keys
+- `ModuleFree` — releases the Persistent<Module> handle
+
 ### GC callbacks (`gc_callback.h` / `gc_callback.cc`)
 
 - `IsolateAddGCPrologueCallback` / `IsolateRemoveGCPrologueCallback`

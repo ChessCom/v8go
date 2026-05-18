@@ -1,11 +1,14 @@
 #include "deps/include/v8-context.h"
+#include "deps/include/v8-function.h"
 #include "deps/include/v8-initialization.h"
 #include "deps/include/v8-locker.h"
+#include "deps/include/v8-microtask.h"
 #include "deps/include/v8-platform.h"
 #include "deps/include/v8-callbacks.h"
 
 #include "context.h"
 #include "isolate.h"
+#include "value.h"
 #include "libplatform/libplatform.h"
 
 using namespace v8;
@@ -211,5 +214,29 @@ void IsolateContextDisposedNotification(IsolatePtr iso, int dependant_context) {
   } else {
     iso->ContextDisposedNotification(ContextDependants::kNoDependants);
   }
+}
+
+int64_t IsolateAdjustExternalMemory(IsolatePtr iso, int64_t change_in_bytes) {
+  Locker locker(iso);
+  Isolate::Scope isolate_scope(iso);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+  return iso->AdjustAmountOfExternalAllocatedMemory(change_in_bytes);
+#pragma GCC diagnostic pop
+}
+
+void IsolateSetMicrotasksPolicy(IsolatePtr iso, int policy) {
+  iso->SetMicrotasksPolicy(static_cast<MicrotasksPolicy>(policy));
+}
+
+void IsolateEnqueueMicrotask(IsolatePtr iso, ValuePtr fn_ptr) {
+  ISOLATE_SCOPE(iso);
+  m_value* val = static_cast<m_value*>(fn_ptr);
+  m_ctx* ctx = val->ctx;
+  Local<Context> local_ctx = ctx->ptr.Get(iso);
+  Context::Scope context_scope(local_ctx);
+  Local<Value> local_val = val->ptr.Get(iso);
+  Local<Function> fn = Local<Function>::Cast(local_val);
+  iso->EnqueueMicrotask(fn);
 }
 }

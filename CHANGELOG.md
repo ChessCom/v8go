@@ -5,6 +5,80 @@ follow `vMAJOR.MINOR.PATCH-chess.N`, where `MAJOR.MINOR.PATCH` mirrors
 the upstream `tommie/v8go` version this fork tracks and `chess.N`
 increments per ChessCom-side change set.
 
+## v0.34.0-chess.2 — 2026-05
+
+Fork-frontier Waves 1–3: cooperative GC, microtask control, external
+memory accounting, OOM observability, ArrayBuffer, external strings,
+named property interceptors, heap profiling, and ES module support.
+
+### Added (Wave 3)
+
+* **ES Module support** (`module.{h,cc,go}`):
+  `Context.CompileModule(source, origin)` compiles an ES module.
+  `Module.Instantiate(resolver)` resolves imports via a Go callback.
+  `Module.Evaluate()` executes the module and returns the completion
+  value. `Module.GetNamespace()` returns the namespace object
+  containing all exports. Full `ModuleStatus` enum and import request
+  introspection (`GetModuleRequestsLength`, `GetModuleRequest`).
+  The resolve callback uses the same trampoline pattern as
+  `FunctionTemplateCallback`.
+
+### Deferred
+
+* **Fast API Callbacks** (F4.1): requires C++ template machinery
+  (`CFunction`/`CFunctionInfo`) that is impractical to expose through
+  CGO. Deferred to a future release.
+* **Streaming Bundle Compile** (F1.3): requires background thread
+  management for `ScriptStreamingTask`. Deferred to a future release.
+
+### Added (Wave 2)
+
+* **ArrayBuffer API** (`arraybuffer.{h,cc,go}`):
+  `NewArrayBuffer(ctx, []byte)` copies Go data into a V8 ArrayBuffer.
+  `NewArrayBufferAlloc(ctx, size)` allocates a zero-initialized
+  ArrayBuffer inside V8's sandbox; `ArrayBufferGetBytes()` returns a
+  writable slice into the backing store for single-copy data transfer.
+  `ArrayBufferByteLength()` returns the buffer size.
+* **External strings** (`external_string.{h,cc,go}`):
+  `NewExternalOneByteString(ctx, []byte)` creates a V8 string pointing
+  directly at Go-owned memory (Latin-1/ASCII only). Zero-copy for
+  immutable string data like DOM attribute values and CSS properties.
+* **Named property interceptors** (`interceptor.{h,cc,go}`):
+  `ObjectTemplate.SetNamedPropertyHandler(getter, setter)` installs
+  interceptor callbacks for lazy property resolution. The getter returns
+  a `*Value` to intercept or nil to fall through. The setter returns
+  true if the set was intercepted. Routes through the isolate callback
+  registry using the `Integer` data pattern.
+* **Heap profiler** (`heap_profiler.{h,cc,go}`):
+  `Isolate.TakeHeapSnapshot()` captures a V8 heap snapshot as JSON,
+  compatible with Chrome DevTools Memory tab. Serialises via a
+  `StringOutputStream` adapter and copies to Go memory.
+
+### Added (Wave 1)
+
+* **External memory accounting** (`isolate.go`):
+  `Isolate.AdjustExternalMemory(int64) int64` — reports Go-side
+  allocations to V8's GC heuristic so collection frequency adjusts
+  to the true memory footprint. Wraps the deprecated
+  `AdjustAmountOfExternalAllocatedMemory` (still functional; a future
+  release will migrate to `ExternalMemoryAccounter`).
+* **Microtask policy control** (`isolate.go`):
+  `Isolate.SetMicrotasksPolicy(MicrotasksPolicy)` — switch between
+  Explicit, Scoped, and Auto microtask drain modes.
+  `MicrotasksPolicyExplicit` / `MicrotasksPolicyScoped` /
+  `MicrotasksPolicyAuto` constants.
+* **Microtask enqueue** (`isolate.go`):
+  `Isolate.EnqueueMicrotask(*Function)` — schedules a JS function as
+  a microtask, bypassing `Promise.resolve().then()` and saving one
+  promise allocation per enqueue.
+* **OOM error handler** (`oom_handler.{h,cc,go}`):
+  `Isolate.SetOOMErrorHandler(OOMErrorCallback)` — installs a Go
+  callback invoked by V8 on out-of-memory. Uses
+  `Isolate::TryGetCurrent()` to recover the active isolate since V8's
+  OOM callback signature does not include it. Pass nil to clear.
+
+---
+
 ## v0.34.0-chess.1 — 2026-05
 
 API surface extensions for improved resilience and performance.

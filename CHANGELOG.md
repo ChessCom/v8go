@@ -23,6 +23,18 @@ named property interceptors, heap profiling, and ES module support.
   The resolve callback uses the same trampoline pattern as
   `FunctionTemplateCallback`.
 
+* **ESM snapshot support** (`pack.go`, `snapshot.cc`, `context.h`):
+  `PackBundleESM` evaluates ES modules inside `SnapshotCreator`,
+  bridges the module namespace to a configurable global key, and
+  serialises the heap into a `PackedSnapshot`. Supports multi-chunk
+  resolution (entry + dependency modules), snapshot stacking on
+  existing blobs, and `FunctionCodeKeep`/`FunctionCodeClear` modes.
+  Module `Persistent<Module>` handles are auto-tracked in `m_ctx` and
+  released before `CreateBlob` to prevent V8 serialisation aborts.
+  Achieves 3.5-6x cold-start speedup over fresh ESM evaluation.
+  Covered by 18 regression tests in `snapshot_esm_test.go` and a
+  dedicated `esm-snapshot` CI job with flake detection (`-count=3`).
+
 ### Deferred
 
 * **Fast API Callbacks** (F4.1): requires C++ template machinery

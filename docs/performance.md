@@ -11,17 +11,20 @@ boot, a snapshot blob is deserialized directly into V8's heap.
 
 ### Benchmark setup
 
-`snapshot_bench_test.go` defines two benchmarks and an assertion test:
+`snapshot_bench_test.go` and `snapshot_esm_test.go` define benchmarks
+and assertion tests for both script and ESM module cold start:
 
 | Benchmark | What it measures |
 |---|---|
 | `BenchmarkColdStart_FromSource` | `NewIsolate` + `NewContext` + `RunScript(bundle)` |
 | `BenchmarkColdStart_FromSnapshot` | `NewIsolate(WithSnapshotBlob)` + `NewContext` + probe |
-| `TestSnapshot_ColdStartSpeedup` | Asserts >= 3.5x speedup factor |
+| `TestSnapshot_ColdStartSpeedup` | Asserts >= 3.5x speedup factor (script path) |
+| `TestSnapshotESM_ColdStartSpeedup` | Asserts >= 3.5x speedup factor (ESM path) |
 
 The synthetic bundle is ~750 KiB of JavaScript (15,000 named arrow
 functions plus a coordinator). At this size, V8's source parsing and
-IC warmup dominate the cold-start wall clock.
+IC warmup dominate the cold-start wall clock. The ESM variant uses
+`export const` declarations achieving comparable speedup ratios.
 
 ### Typical results (M-class Apple Silicon)
 
@@ -236,7 +239,8 @@ V8's shared-heap teardown races with construction. Disposal is fast
 
 For request-per-isolate architectures:
 
-1. Use `PackBundle` + `RestoreIsolate` for the snapshot path.
+1. Use `PackBundle` (scripts) or `PackBundleESM` (ES modules) +
+   `RestoreIsolate` for the snapshot path.
 2. Size the isolate pool to match expected concurrency.
 3. Set `WithResourceConstraints` to bound heap growth.
 4. Monitor `GetHeapStatistics` to detect memory leaks in long-lived

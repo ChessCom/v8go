@@ -9,6 +9,7 @@
 #include "context.h"
 #include "function_template.h"
 #include "isolate.h"
+#include "module.h"
 #include "snapshot.h"
 #include "template.h"
 
@@ -118,6 +119,13 @@ static void SnapshotCreatorReleaseEmbedderHandles(Isolate* iso, m_ctx* ctx) {
   for (m_template* tmpl : ctx->templates) {
     tmpl->ptr.Reset();
   }
+  // Release any module handles that the Go caller did not explicitly
+  // Close() before CreateBlob. Without this V8 aborts on serialisation.
+  for (m_module* mod : ctx->modules) {
+    if (mod != nullptr) {
+      mod->ptr.Reset();
+    }
+  }
 }
 
 StartupBlob SnapshotCreatorCreateBlob(SnapshotCreatorPtr p,
@@ -170,6 +178,11 @@ StartupBlob SnapshotCreatorCreateBlob(SnapshotCreatorPtr p,
     }
     for (m_unboundScript* us : c->unboundScripts) {
       delete us;
+    }
+    for (m_module* mod : c->modules) {
+      if (mod != nullptr) {
+        delete mod;
+      }
     }
     delete c;
   };

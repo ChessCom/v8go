@@ -52,6 +52,8 @@ work once at build time and recover the resulting heap for free at
 runtime. This fork exposes both a low-level `SnapshotCreator` binding
 and a high-level Pack/Restore API.
 
+**Script bundles (IIFE / global assignment):**
+
 ```go
 packed, err := v8.PackBundle(v8.PackOptions{
     Source:            string(bundleJS),
@@ -68,9 +70,27 @@ ctx := v8.NewContext(iso)
 ctx.RunScript("globalThis.handle(request)", "handler.js")
 ```
 
+**ES module bundles (import/export):**
+
+```go
+packed, err := v8.PackBundleESM(v8.PackESMOptions{
+    EntrySource: string(esmBundleJS),
+    EntryOrigin: "app.mjs",
+    Chunks: map[string]string{
+        "./chunk.mjs": string(chunkJS),
+    },
+    BridgeKey: "__app",
+    FCH:       v8.FunctionCodeKeep,
+})
+iso, err := packed.RestoreIsolate(v8.RestoreOptions{})
+ctx := v8.NewContext(iso)
+val, _ := ctx.RunScript("__app.render(request)", "handler.js")
+```
+
 Round-trip on a ~750 KiB synthetic bundle is roughly **3.5-6x faster**
 than re-parsing the source at boot; absolute cold-start drops from
-~15 ms to ~4 ms on M-class hardware.
+~15 ms to ~4 ms on M-class hardware. Both script and ESM paths achieve
+comparable speedup.
 
 ### JavaScript function with Go callback
 
@@ -231,6 +251,10 @@ The ChessCom fork adds:
 * **High-level Pack/Restore API** -- versioned snapshot envelope with
   V8 ABI + external-references digest validation so a stale or
   corrupt blob is rejected before V8 ever sees it.
+* **ESM snapshot support** -- `PackBundleESM` evaluates ES modules
+  (with multi-chunk resolution) inside `SnapshotCreator`, bridges the
+  module namespace to a global, and serialises the heap. Module handles
+  are auto-tracked and released to prevent V8 serialization aborts.
 * **Deterministic snapshot mode** -- pin `Date.now`, `Math.random`,
   and `performance.now` to a seed so snapshot inputs are reproducible.
 * **Concurrency-safe wrapper** -- process-wide serialisation of

@@ -20,6 +20,7 @@ class Context;
 typedef v8::Isolate v8Isolate;
 typedef struct m_unboundScript m_unboundScript;
 typedef struct m_template m_template;
+typedef struct m_module m_module;
 
 struct m_ctx {
   v8::Isolate* iso;
@@ -37,6 +38,12 @@ struct m_ctx {
   // isolates do not race on the underlying vector.
   bool track_templates;
   std::vector<m_template*> templates;
+  // modules tracks every m_module* compiled on this context while
+  // track_templates is enabled (SnapshotCreator path only). Before
+  // CreateBlob the wrapper auto-releases any Persistent<Module> handles
+  // that the Go caller did not explicitly Close(). Without this V8
+  // fatal-aborts with "global handle not serialized".
+  std::vector<m_module*> modules;
 };
 typedef m_ctx* ContextPtr;
 

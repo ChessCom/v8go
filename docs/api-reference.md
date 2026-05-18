@@ -1253,3 +1253,72 @@ for i := 0; i < n; i++ {
     fmt.Println(mod.GetModuleRequest(i)) // "./dep.mjs"
 }
 ```
+
+### ESM Snapshots (PackBundleESM)
+
+Evaluate an ES module inside a SnapshotCreator and serialize the
+resulting heap. The module namespace is bridged to a global property
+so consumers can access exports without re-evaluating the module.
+
+```go
+packed, err := v8.PackBundleESM(v8.PackESMOptions{
+    EntrySource: `
+        import { helper } from './chunk.mjs';
+        export function render(x) { return helper(x); }
+    `,
+    EntryOrigin: "entry.mjs",
+    Chunks: map[string]string{
+        "./chunk.mjs": `export function helper(x) { return "<div>" + x + "</div>"; }`,
+    },
+    FCH:       v8.FunctionCodeKeep,
+    BridgeKey: "__app",              // default: "__esmExports"
+    Extra:     map[string]string{"route": "/home"},
+})
+```
+
+Restore and use:
+
+```go
+iso, err := packed.RestoreIsolate(v8.RestoreOptions{})
+ctx := v8.NewContext(iso)
+val, _ := ctx.RunScript(`__app.render("hello")`, "probe.js")
+fmt.Println(val.String()) // "<div>hello</div>"
+```
+
+With snapshot stacking (base polyfills + ESM app):
+
+```go
+basePacked, _ := v8.PackBundle(v8.PackOptions{
+    Source: polyfillsJS,
+    FCH:   v8.FunctionCodeKeep,
+})
+appPacked, _ := v8.PackBundleESM(v8.PackESMOptions{
+    EntrySource:  appBundleESM,
+    ExistingBlob: basePacked.Blob,
+    BridgeKey:    "__app",
+    FCH:          v8.FunctionCodeKeep,
+})
+```
+
+Low-level ESM snapshot (without PackBundleESM):
+
+```go
+sc := v8.NewSnapshotCreator()
+ctx := sc.Context()
+
+mod, _ := ctx.CompileModule(source, "app.mjs")
+mod.Instantiate(resolver)
+mod.Evaluate()
+
+ns := mod.GetNamespace()
+ctx.Global().Set("__app", ns)
+mod.Close()
+
+blob, _ := sc.CreateBlob(v8.FunctionCodeKeep)
+sc.Dispose()
+```
+
+Module handles are tracked automatically when compiled on a
+SnapshotCreator context. If `mod.Close()` is not called before
+`CreateBlob`, the handles are auto-released to prevent V8 from
+aborting on "global handle not serialized".

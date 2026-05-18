@@ -222,6 +222,154 @@ func PackBundle(opts PackOptions) (*PackedSnapshot, error) {
 	return p, nil
 }
 
+// PackESMOptions configure PackBundleESM.
+type PackESMOptions struct {
+	// EntrySource is the ES module entry point source. Must be non-empty.
+	EntrySource string
+
+	// EntryOrigin is the script origin recorded in stack traces. Defaults
+	// to "entry.mjs" if blank.
+	EntryOrigin string
+
+	// Chunks maps import specifier -> source for additional chunk modules
+	// the entry imports. Each chunk is compiled, instantiated, and evaluated
+	// before the entry module so it can resolve imports.
+	Chunks map[string]string
+
+	// FCH controls how compiled functions are encoded.
+	FCH FunctionCodeHandling
+
+	// ExistingBlob warm-starts the SnapshotCreator from a prior blob.
+	ExistingBlob []byte
+
+	// BridgeKey is the global property name where the module namespace is
+	// stored. Defaults to "__esmExports" if blank.
+	BridgeKey string
+
+	// DeterministicTime installs the determinism shim.
+	DeterministicTime bool
+	SeedMillis        int64
+
+	// Extra is copied verbatim into PackedSnapshot.Extra.
+	Extra map[string]string
+}
+
+// PackBundleESM evaluates an ES module (with optional chunk dependencies) on
+// a fresh SnapshotCreator, bridges the module namespace to a global property,
+// and serialises the resulting heap into a PackedSnapshot. This is the ESM
+// equivalent of PackBundle for use with `import`/`export` bundles.
+func PackBundleESM(opts PackESMOptions) (*PackedSnapshot, error) {
+	if opts.EntrySource == "" {
+		return nil, fmt.Errorf("v8go: PackBundleESM: EntrySource is required")
+	}
+	origin := opts.EntryOrigin
+	if origin == "" {
+		origin = "entry.mjs"
+	}
+	bridgeKey := opts.BridgeKey
+	if bridgeKey == "" {
+		bridgeKey = "__esmExports"
+	}
+
+	scOpts := []SnapshotCreatorOption{}
+	if len(opts.ExistingBlob) > 0 {
+		scOpts = append(scOpts, WithExistingSnapshotBlob(opts.ExistingBlob))
+	}
+	if opts.DeterministicTime {
+		scOpts = append(scOpts, WithDeterministicTime(opts.SeedMillis))
+	}
+
+	sc := NewSnapshotCreator(scOpts...)
+	defer sc.Dispose()
+
+	ctx := sc.Context()
+
+	// Compile and evaluate chunk modules first
+	type compiledChunk struct {
+		mod       *Module
+		specifier string
+	}
+	var chunks []compiledChunk
+	for spec, src := range opts.Chunks {
+		m, err := ctx.CompileModule(src, spec)
+		if err != nil {
+			return nil, fmt.Errorf("v8go: PackBundleESM: chunk %q compile failed: %w", spec, err)
+		}
+		chunks = append(chunks, compiledChunk{mod: m, specifier: spec})
+	}
+
+	// Build resolver from compiled chunks
+	chunkMap := make(map[string]*Module, len(chunks))
+	for _, c := range chunks {
+		chunkMap[c.specifier] = c.mod
+	}
+	resolver := func(specifier string, referrerHash int) *Module {
+		return chunkMap[specifier]
+	}
+
+	// Instantiate and evaluate chunks
+	for _, c := range chunks {
+		if err := c.mod.Instantiate(resolver); err != nil {
+			return nil, fmt.Errorf("v8go: PackBundleESM: chunk %q instantiate failed: %w", c.specifier, err)
+		}
+	}
+	for _, c := range chunks {
+		if _, err := c.mod.Evaluate(); err != nil {
+			return nil, fmt.Errorf("v8go: PackBundleESM: chunk %q evaluate failed: %w", c.specifier, err)
+		}
+	}
+
+	// Compile, instantiate, and evaluate entry module
+	entryMod, err := ctx.CompileModule(opts.EntrySource, origin)
+	if err != nil {
+		return nil, fmt.Errorf("v8go: PackBundleESM: entry compile failed: %w", err)
+	}
+	if err := entryMod.Instantiate(resolver); err != nil {
+		return nil, fmt.Errorf("v8go: PackBundleESM: entry instantiate failed: %w", err)
+	}
+	if _, err := entryMod.Evaluate(); err != nil {
+		return nil, fmt.Errorf("v8go: PackBundleESM: entry evaluate failed: %w", err)
+	}
+
+	// Bridge namespace to global
+	ns := entryMod.GetNamespace()
+	if ns == nil {
+		return nil, fmt.Errorf("v8go: PackBundleESM: GetNamespace returned nil")
+	}
+	if err := ctx.Global().Set(bridgeKey, ns); err != nil {
+		return nil, fmt.Errorf("v8go: PackBundleESM: bridge global.Set failed: %w", err)
+	}
+
+	// Release module handles before CreateBlob
+	entryMod.Close()
+	for _, c := range chunks {
+		c.mod.Close()
+	}
+
+	blob, err := sc.CreateBlob(opts.FCH)
+	if err != nil {
+		return nil, fmt.Errorf("v8go: PackBundleESM: CreateBlob failed: %w", err)
+	}
+
+	bundleSum := sha256.Sum256([]byte(opts.EntrySource))
+
+	p := &PackedSnapshot{
+		V8ABI:        Version(),
+		RefsDigest:   ExternalReferenceRegistryDigest(),
+		BundleSHA256: hex.EncodeToString(bundleSum[:]),
+		CreatedUnix:  time.Now().Unix(),
+		FCH:          opts.FCH,
+		Blob:         blob,
+	}
+	if len(opts.Extra) > 0 {
+		p.Extra = make(map[string]string, len(opts.Extra))
+		for k, v := range opts.Extra {
+			p.Extra[k] = v
+		}
+	}
+	return p, nil
+}
+
 // RestoreOptions configure PackedSnapshot.RestoreIsolate.
 type RestoreOptions struct {
 	// AllowABIMismatch lets the consumer load a blob whose V8 ABI tag

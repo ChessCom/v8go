@@ -27,6 +27,22 @@ jobs:
       - name: go test
         run: go test -count=1 -timeout 5m ./...
 
+  esm-snapshot:
+    name: esm-snapshot (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+      - name: ESM snapshot regression (count=3 for flake detection)
+        run: go test -v -run "TestSnapshotESM|TestPackBundleESM" -count=3 -timeout 5m ./...
+
   vet:
     name: vet (gofmt + go vet + clang-format)
     runs-on: ubuntu-latest

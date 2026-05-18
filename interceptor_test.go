@@ -13,6 +13,10 @@ func TestSetNamedPropertyHandler_Getter(t *testing.T) {
 	tmpl := v8.NewObjectTemplate(iso)
 	tmpl.SetNamedPropertyHandler(
 		func(property string, info *v8.InterceptorCallbackInfo) *v8.Value {
+			ctx := info.Context()
+			if ctx == nil {
+				t.Error("expected non-nil context from InterceptorCallbackInfo")
+			}
 			if property == "magic" {
 				val, _ := v8.NewValue(iso, int32(42))
 				return val
@@ -70,6 +74,10 @@ func TestSetNamedPropertyHandler_Setter(t *testing.T) {
 	tmpl := v8.NewObjectTemplate(iso)
 	tmpl.SetNamedPropertyHandler(
 		func(property string, info *v8.InterceptorCallbackInfo) *v8.Value {
+			ctx := info.Context()
+			if ctx == nil {
+				t.Error("expected non-nil context in getter")
+			}
 			if property == "intercepted" {
 				val, _ := v8.NewValue(iso, captured)
 				return val
@@ -77,6 +85,10 @@ func TestSetNamedPropertyHandler_Setter(t *testing.T) {
 			return nil
 		},
 		func(property string, value *v8.Value, info *v8.InterceptorCallbackInfo) bool {
+			ctx := info.Context()
+			if ctx == nil {
+				t.Error("expected non-nil context in setter")
+			}
 			if property == "intercepted" {
 				captured = value.String()
 				return true

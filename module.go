@@ -147,4 +147,3 @@ func goResolveModuleCallback(ctxRef C.int, specifier *C.char, referrerHash C.int
 	}
 	return mod.ptr
 }
-

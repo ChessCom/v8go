@@ -69,6 +69,36 @@ func TestModule_ImportRequests(t *testing.T) {
 	}
 }
 
+func TestModule_IdentityHash(t *testing.T) {
+	iso := v8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := v8.NewContext(iso)
+	defer ctx.Close()
+
+	mod1, err := ctx.CompileModule("export const a = 1;", "a.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mod1.Close()
+
+	mod2, err := ctx.CompileModule("export const b = 2;", "b.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mod2.Close()
+
+	h1 := mod1.IdentityHash()
+	h2 := mod2.IdentityHash()
+	if h1 == h2 {
+		t.Fatalf("expected different hashes for different modules, both got %d", h1)
+	}
+
+	if mod1.IdentityHash() != h1 {
+		t.Fatal("IdentityHash should be stable")
+	}
+}
+
 func TestModule_InstantiateAndEvaluate(t *testing.T) {
 	iso := v8.NewIsolate()
 	defer iso.Dispose()
@@ -153,6 +183,27 @@ func TestModule_Namespace(t *testing.T) {
 	}
 	if yVal.Int32() != 20 {
 		t.Fatalf("expected y=20, got %d", yVal.Int32())
+	}
+}
+
+func TestModule_InstantiateFailure(t *testing.T) {
+	iso := v8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := v8.NewContext(iso)
+	defer ctx.Close()
+
+	mod, err := ctx.CompileModule(`import { x } from './missing.mjs';`, "fail.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mod.Close()
+
+	err = mod.Instantiate(func(specifier string, referrerHash int) *v8.Module {
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected instantiation error when resolver returns nil")
 	}
 }
 

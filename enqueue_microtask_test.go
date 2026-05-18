@@ -116,4 +116,3 @@ func TestEnqueueMicrotask_WithPromise(t *testing.T) {
 		t.Logf("order: %q (may vary by V8 scheduling)", result.String())
 	}
 }
-

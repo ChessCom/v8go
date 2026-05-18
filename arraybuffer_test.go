@@ -111,6 +111,10 @@ func TestNewArrayBuffer_Empty(t *testing.T) {
 	if ab.ArrayBufferByteLength() != 0 {
 		t.Fatalf("expected byte length 0, got %d", ab.ArrayBufferByteLength())
 	}
+	got := ab.ArrayBufferGetBytes()
+	if got != nil {
+		t.Fatalf("expected nil bytes for empty ArrayBuffer, got %v", got)
+	}
 }
 
 func TestNewArrayBuffer_JSInterop(t *testing.T) {

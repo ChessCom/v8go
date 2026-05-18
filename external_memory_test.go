@@ -20,7 +20,7 @@ func TestAdjustExternalMemory_NegativeDelta(t *testing.T) {
 	iso := v8.NewIsolate()
 	defer iso.Dispose()
 
-	iso.AdjustExternalMemory(2 * 1024 * 1024) // +2 MiB
+	iso.AdjustExternalMemory(2 * 1024 * 1024)        // +2 MiB
 	result := iso.AdjustExternalMemory(-1024 * 1024) // -1 MiB
 
 	if result < 1024*1024 {
@@ -47,7 +47,7 @@ func TestAdjustExternalMemory_ReturnValue(t *testing.T) {
 
 	r1 := iso.AdjustExternalMemory(10 * 1024 * 1024) // +10 MiB
 	r2 := iso.AdjustExternalMemory(5 * 1024 * 1024)  // +5 MiB
-	r3 := iso.AdjustExternalMemory(-3 * 1024 * 1024)  // -3 MiB
+	r3 := iso.AdjustExternalMemory(-3 * 1024 * 1024) // -3 MiB
 
 	if r2 <= r1 {
 		t.Fatalf("second adjustment should be larger; r1=%d, r2=%d", r1, r2)

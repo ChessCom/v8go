@@ -5,7 +5,7 @@ follow `vMAJOR.MINOR.PATCH-chess.N`, where `MAJOR.MINOR.PATCH` mirrors
 the upstream `tommie/v8go` version this fork tracks and `chess.N`
 increments per ChessCom-side change set.
 
-## v0.34.0-chess.2 — 2026-05
+## v0.34.0-chess.3 — 2026-05
 
 Fork-frontier Waves 1–3: cooperative GC, microtask control, external
 memory accounting, OOM observability, ArrayBuffer, external strings,

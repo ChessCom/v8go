@@ -7,10 +7,14 @@ Cloudflare Workers achieves at production scale.
 
 ## Where we are today
 
-The Pack/Restore API (`PackBundle` + `RestoreIsolate`) gives a 3.5–6x
-speedup over parsing raw source at boot. On M-class hardware a ~750 KiB
-synthetic bundle goes from ~15 ms (source eval) to ~4 ms (snapshot
-restore). The breakdown of that 4 ms is roughly:
+The Pack/Restore API (`PackBundle` / `PackBundleESM` + `RestoreIsolate`)
+gives a 3.5–6x speedup over parsing raw source at boot. On M-class
+hardware a ~750 KiB synthetic bundle goes from ~15 ms (source eval) to
+~4 ms (snapshot restore). Both IIFE/script bundles and ESM bundles are
+supported — `PackBundleESM` evaluates modules inside the SnapshotCreator,
+bridges the module namespace to a global, and serialises the heap.
+
+The breakdown of that 4 ms is roughly:
 
 | Phase | Cost |
 |---|---|

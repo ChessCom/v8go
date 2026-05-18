@@ -15,6 +15,9 @@ class Module;
 struct m_module {
   v8::Persistent<v8::Module> ptr;
   v8::Isolate* iso;
+  // When true, this module is tracked by a SnapshotCreator context.
+  // ModuleFree must null out the tracking entry instead of deleting.
+  bool tracked;
 };
 
 typedef v8::Isolate v8Isolate;

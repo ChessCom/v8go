@@ -65,7 +65,16 @@ RtnModule CompileESModule(ContextPtr ctx_ptr,
   m_module* mod = new m_module;
   mod->ptr.Reset(iso, module);
   mod->iso = iso;
+  mod->tracked = false;
   rtn.ptr = mod;
+
+  // Track module for auto-release during SnapshotCreator.CreateBlob.
+  m_ctx* ctx = static_cast<m_ctx*>(iso->GetData(0));
+  if (ctx != nullptr && ctx->track_templates) {
+    mod->tracked = true;
+    ctx->modules.push_back(mod);
+  }
+
   return rtn;
 }
 
@@ -150,6 +159,20 @@ ValuePtr ModuleGetNamespace(ContextPtr ctx_ptr, ModulePtr mod) {
 void ModuleFree(ModulePtr mod) {
   if (mod == nullptr) return;
   mod->ptr.Reset();
+  if (mod->tracked) {
+    // Module is tracked by a SnapshotCreator context. Null out the
+    // tracking entry so the release code skips it; the struct will be
+    // freed by SnapshotCreatorReleaseEmbedderHandles.
+    m_ctx* ctx = static_cast<m_ctx*>(mod->iso->GetData(0));
+    if (ctx != nullptr) {
+      for (auto& entry : ctx->modules) {
+        if (entry == mod) {
+          entry = nullptr;
+          break;
+        }
+      }
+    }
+  }
   delete mod;
 }
 

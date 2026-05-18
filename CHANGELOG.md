@@ -5,6 +5,29 @@ follow `vMAJOR.MINOR.PATCH-chess.N`, where `MAJOR.MINOR.PATCH` mirrors
 the upstream `tommie/v8go` version this fork tracks and `chess.N`
 increments per ChessCom-side change set.
 
+## v0.34.0-chess.4 — 2026-05
+
+ESM snapshot support: evaluate ES modules inside SnapshotCreator and
+serialize the resulting heap for instant restore.
+
+### Added
+
+- `PackBundleESM()` high-level API for snapshotting ES module bundles
+  with multi-chunk resolver support
+- Module handle auto-tracking in SnapshotCreator contexts to prevent
+  V8 "global handle not serialized" aborts
+- 21 regression tests covering named/default exports, closures,
+  multi-chunk, diamond deps, stacking, complex object graphs,
+  auto-release safety, render parity, and cold-start speedup
+- Dedicated `esm-snapshot` CI job with `-count=3` flake detection
+
+### Performance
+
+- ESM snapshot cold-start achieves 3.5–4.6x speedup over fresh module
+  evaluation on M-class hardware (~750 KiB bundle)
+
+---
+
 ## v0.34.0-chess.3 — 2026-05
 
 Fork-frontier Waves 1–3: cooperative GC, microtask control, external

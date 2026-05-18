@@ -399,3 +399,74 @@ Each callback category lives in its own `.h`/`.cc`/`.go` triple:
 The interrupt callback is special: it terminates execution directly in
 C (`TerminateExecution`) without crossing back to Go, avoiding
 reentrancy issues with CGO during JS execution.
+
+| OOM error | `oom_handler.cc` | `goOOMErrorCallback` | `SetOOMErrorHandler` |
+
+The OOM handler uses `Isolate::TryGetCurrent()` to recover the active
+isolate pointer since V8's OOM callback signature does not include it.
+
+### Microtask and external memory APIs
+
+The following APIs are direct C shims without callback trampolines:
+
+| API | C function | V8 call |
+|---|---|---|
+| `SetMicrotasksPolicy` | `IsolateSetMicrotasksPolicy` | `Isolate::SetMicrotasksPolicy` |
+| `EnqueueMicrotask` | `IsolateEnqueueMicrotask` | `Isolate::EnqueueMicrotask(Local<Function>)` |
+| `AdjustExternalMemory` | `IsolateAdjustExternalMemory` | `Isolate::AdjustAmountOfExternalAllocatedMemory` |
+
+`EnqueueMicrotask` requires extracting the `v8::Function` from the
+`m_value` wrapper and entering the value's context scope before
+enqueuing.
+
+### ArrayBuffer and external strings
+
+`NewArrayBufferFromBytes` copies Go data into a V8-sandbox-allocated
+`BackingStore`. `NewArrayBufferAlloc` allocates an empty buffer inside
+the sandbox; the caller can then write directly into the backing store
+via `ArrayBufferGetData`.
+
+V8's sandbox mode requires all ArrayBuffer backing stores to reside in
+the sandbox address space, so true zero-copy from Go memory is not
+possible with the current V8 build. `NewArrayBufferAlloc` +
+`ArrayBufferGetBytes` achieves a single-copy fast path.
+
+`NewExternalOneByteString` wraps a C++ `ExternalOneByteStringResource`
+subclass that points at Go-owned memory. V8 reads directly from the Go
+slice; the caller must ensure the slice outlives the V8 string.
+
+### Named property interceptors
+
+`ObjectTemplateSetNamedPropertyHandler` installs getter/setter
+interceptors on an `ObjectTemplate`. The callbacks route through the
+isolate's callback registry using the same `Integer` data pattern as
+`FunctionTemplateCallback`. The getter trampoline returns
+`Intercepted::kYes` with a value set on `info.GetReturnValue()`, or
+`Intercepted::kNo` for fall-through.
+
+### ES Modules
+
+`CompileESModule` compiles an ES module source into a `v8::Module`,
+stored in a C-side `m_module` struct with `Persistent<Module>`. The
+module lifecycle follows V8's ECMAScript module semantics:
+
+1. **Compile** → `ModuleStatusUninstantiated`
+2. **Instantiate** (with `ResolveModuleCallback`) → `ModuleStatusInstantiated`
+3. **Evaluate** → `ModuleStatusEvaluated` or `ModuleStatusErrored`
+
+The resolve callback uses the same trampoline pattern as other
+callbacks: the Go-side stores a per-context resolver function in a
+global map keyed by context reference, and the C++ trampoline
+(`resolveModuleTrampoline`) extracts the context reference from
+`GetEmbedderData(1)` and calls the Go export `goResolveModuleCallback`.
+
+Module pointers are managed separately from Values because
+`v8::Module` inherits from `v8::Data`, not `v8::Value`.
+
+### Heap profiler
+
+`IsolateTakeHeapSnapshot` captures a heap snapshot via
+`HeapProfiler::TakeHeapSnapshot`, serializes it to JSON through a
+`StringOutputStream` adapter, copies the result to a `malloc`'d buffer,
+and deletes the V8-side snapshot. The Go side copies the buffer into a
+Go byte slice and frees the C buffer.

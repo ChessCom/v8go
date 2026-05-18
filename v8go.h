@@ -35,8 +35,16 @@ typedef const v8CpuProfileNode* CpuProfileNodePtr;
 #include "unbound_script.h"
 #include "value.h"
 
-// Opaque to both C and C++
+#ifdef __cplusplus
+#include "deps/include/v8-array-buffer.h"
+struct v8BackingStore {
+  v8BackingStore(std::shared_ptr<v8::BackingStore>&& ptr)
+      : backing_store{ptr} {}
+  std::shared_ptr<v8::BackingStore> backing_store;
+};
+#else
 typedef struct v8BackingStore v8BackingStore;
+#endif
 typedef v8BackingStore* BackingStorePtr;
 
 #include <stddef.h>

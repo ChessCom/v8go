@@ -1049,3 +1049,207 @@ Remove all registered callbacks.
 iso.RemoveGCPrologueCallbacks()
 iso.RemoveGCEpilogueCallbacks()
 ```
+
+---
+
+## External Memory Accounting
+
+### AdjustExternalMemory
+
+Reports Go-side allocations to V8's GC heuristic so V8 can factor
+them into its collection decisions. Every positive adjustment should
+eventually be balanced by a negative adjustment.
+
+```go
+newTotal := iso.AdjustExternalMemory(1024 * 1024)  // +1 MiB
+iso.AdjustExternalMemory(-1024 * 1024)              // -1 MiB
+```
+
+---
+
+## Microtask Control
+
+### SetMicrotasksPolicy
+
+Controls when V8 drains its microtask queue.
+
+```go
+iso.SetMicrotasksPolicy(v8.MicrotasksPolicyExplicit) // manual checkpoint required
+iso.SetMicrotasksPolicy(v8.MicrotasksPolicyScoped)   // drain at scope boundaries
+iso.SetMicrotasksPolicy(v8.MicrotasksPolicyAuto)     // drain at every script exit
+```
+
+### EnqueueMicrotask
+
+Schedules a JavaScript function to run as a microtask, bypassing the
+`Promise.resolve().then(fn)` pattern and saving one promise allocation.
+
+```go
+fnVal, _ := ctx.RunScript("(function() { console.log('microtask') })", "mt.js")
+fn, _ := fnVal.AsFunction()
+iso.EnqueueMicrotask(fn)
+ctx.PerformMicrotaskCheckpoint() // or wait for auto-drain
+```
+
+---
+
+## OOM Error Handler
+
+### SetOOMErrorHandler
+
+Installs a Go callback that V8 invokes on out-of-memory. The callback
+runs on the V8 thread mid-allocation and must not allocate Go memory
+or call back into V8. Pass nil to clear and restore default behavior.
+
+```go
+iso.SetOOMErrorHandler(func(location string, isHeap bool) {
+    log.Printf("V8 OOM at %s (heap=%v)", location, isHeap)
+})
+
+iso.SetOOMErrorHandler(nil) // restore default abort-on-OOM
+```
+
+---
+
+## ArrayBuffer
+
+### NewArrayBuffer
+
+Creates an ArrayBuffer by copying a Go byte slice into V8's heap.
+
+```go
+ab, _ := v8.NewArrayBuffer(ctx, []byte{1, 2, 3, 4})
+```
+
+### NewArrayBufferAlloc
+
+Allocates a zero-initialized ArrayBuffer inside V8's sandbox address
+space. Use `ArrayBufferGetBytes` to populate it without an extra copy.
+
+```go
+ab, _ := v8.NewArrayBufferAlloc(ctx, 1024)
+backing := ab.ArrayBufferGetBytes()
+copy(backing, myData)
+```
+
+### ArrayBufferGetBytes / ArrayBufferByteLength
+
+Access the backing store and length of an ArrayBuffer.
+
+```go
+data := ab.ArrayBufferGetBytes() // []byte pointing into V8 backing store
+length := ab.ArrayBufferByteLength()
+```
+
+---
+
+## External Strings
+
+### NewExternalOneByteString
+
+Creates a V8 string that points directly at Go memory without copying.
+The caller must keep the backing slice alive and immutable for the
+string's lifetime. Only valid for Latin-1 / ASCII data.
+
+```go
+data := []byte("hello")
+val, _ := v8.NewExternalOneByteString(ctx, data)
+// data must remain live while val is reachable
+```
+
+---
+
+## Named Property Interceptors
+
+### SetNamedPropertyHandler
+
+Installs interceptors on an ObjectTemplate for named property access.
+
+```go
+tmpl := v8.NewObjectTemplate(iso)
+tmpl.SetNamedPropertyHandler(
+    func(property string, info *v8.InterceptorCallbackInfo) *v8.Value {
+        if property == "magic" {
+            val, _ := v8.NewValue(iso, int32(42))
+            return val
+        }
+        return nil // fall through to own properties
+    },
+    func(property string, value *v8.Value, info *v8.InterceptorCallbackInfo) bool {
+        log.Printf("set %s = %s", property, value.String())
+        return true // intercepted
+    },
+)
+ctx := v8.NewContext(iso, tmpl) // tmpl as global
+```
+
+---
+
+## Heap Profiler
+
+### TakeHeapSnapshot
+
+Takes a V8 heap snapshot and returns it as JSON. Compatible with
+Chrome DevTools Memory tab.
+
+```go
+snapshot, _ := iso.TakeHeapSnapshot()
+os.WriteFile("heap.json", snapshot, 0644)
+```
+
+---
+
+## ES Modules (ESM)
+
+### CompileModule
+
+Compiles an ES module from source. The module starts in
+`ModuleStatusUninstantiated`.
+
+```go
+mod, err := ctx.CompileModule(`export const x = 42;`, "my-module.mjs")
+defer mod.Close()
+```
+
+### Module Status
+
+```go
+v8.ModuleStatusUninstantiated // 0 — compiled but not instantiated
+v8.ModuleStatusInstantiating  // 1 — resolving imports
+v8.ModuleStatusInstantiated   // 2 — ready to evaluate
+v8.ModuleStatusEvaluating     // 3 — currently evaluating
+v8.ModuleStatusEvaluated      // 4 — evaluation succeeded
+v8.ModuleStatusErrored        // 5 — evaluation failed
+```
+
+### Instantiate and Evaluate
+
+```go
+err = mod.Instantiate(func(specifier string, referrerHash int) *v8.Module {
+    // Look up and return the module for the given import specifier.
+    return moduleMap[specifier]
+})
+val, err := mod.Evaluate()
+```
+
+### Module Namespace
+
+After evaluation, access the module's exports via its namespace object.
+
+```go
+ns := mod.GetNamespace()
+obj := ns.Object()
+xVal, _ := obj.Get("x")
+fmt.Println(xVal.Int32()) // 42
+```
+
+### Import Requests
+
+Inspect a module's import statements before instantiation.
+
+```go
+n := mod.GetModuleRequestsLength()
+for i := 0; i < n; i++ {
+    fmt.Println(mod.GetModuleRequest(i)) // "./dep.mjs"
+}
+```

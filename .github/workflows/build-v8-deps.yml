@@ -92,13 +92,6 @@ jobs:
           EOF
           gclient sync --delete_unversioned_trees --no-history
 
-      - name: install cross-compile deps (linux/arm64)
-        if: matrix.target_os == 'linux' && matrix.target_arch == 'arm64'
-        run: |
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update
-          sudo apt-get install -y binutils-aarch64-linux-gnu
-
       - name: generate build args
         run: |
           mkdir -p deps/.build/${{ matrix.target_os }}_${{ matrix.target_arch }}

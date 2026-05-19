@@ -421,19 +421,52 @@ enqueuing.
 
 ### ArrayBuffer and external strings
 
-`NewArrayBufferFromBytes` copies Go data into a V8-sandbox-allocated
-`BackingStore`. `NewArrayBufferAlloc` allocates an empty buffer inside
-the sandbox; the caller can then write directly into the backing store
-via `ArrayBufferGetData`.
+`NewArrayBufferFromBytes` copies Go data into a V8-allocated
+`BackingStore`. `NewArrayBufferAlloc` allocates an empty buffer; the
+caller can then write directly into the backing store via
+`ArrayBufferGetData`.
 
-V8's sandbox mode requires all ArrayBuffer backing stores to reside in
-the sandbox address space, so true zero-copy from Go memory is not
-possible with the current V8 build. `NewArrayBufferAlloc` +
-`ArrayBufferGetBytes` achieves a single-copy fast path.
+`NewArrayBufferExternal` attempts true zero-copy: it wraps Go-owned
+memory as an external `BackingStore` via `runtime.Pinner`, so JS and
+Go share the same bytes. However, when `V8_ENABLE_SANDBOX` is active
+(the case with current prebuilt deps), V8 requires all backing stores
+to reside inside its sandbox address space. In this mode, the C++
+implementation (`arraybuffer.cc`) falls back to alloc + `memcpy` and
+immediately releases the Go-side pin. The runtime function
+`SandboxEnabled()` reports which mode is active. Once V8 deps are
+rebuilt with `v8_enable_sandbox=false` (configured in `deps/build.py`),
+the zero-copy path activates automatically.
 
 `NewExternalOneByteString` wraps a C++ `ExternalOneByteStringResource`
 subclass that points at Go-owned memory. V8 reads directly from the Go
 slice; the caller must ensure the slice outlives the V8 string.
+
+### V8 Fast API callbacks
+
+`NewFastFunctionTemplate` (`function_template.{h,cc,go}`) registers a
+V8 `CFunction` alongside the normal slow-path Go callback. When
+TurboFan optimizes a call site and proves argument types match the
+`FastCallDescriptor`, it invokes the C function directly — bypassing
+CGo, argument marshaling, and `m_value` allocation.
+
+The type descriptor is built at runtime by `BuildCFunctionInfo`
+(`fast_api.{h,cc}`), which constructs a `v8::CFunctionInfo` from a
+C-level `CTypeInfoType` array. The Go side exposes a `CType` enum and
+`FastCallDescriptor` struct that map to these C types. The fast
+function pointer and `CFunctionInfo` are passed to
+`FunctionTemplate::New` via its `CFunction` overload.
+
+Constraints: the fast function must be C-linkage, must not allocate on
+the JS heap or trigger JS execution, and its address must be registered
+via `AddExternalReference` for snapshot compatibility.
+
+### Idle-task GC scheduling
+
+`RunIdleTasks(deadlineSeconds)` (`isolate.{h,cc,go}`) calls
+`platform::RunIdleTasks` with the default platform and a time budget.
+V8 uses this window for incremental GC sweeping, deoptimization
+cleanup, and code aging. The platform is initialized with
+`IdleTaskSupport::kEnabled` to activate idle task posting.
 
 ### Named property interceptors
 

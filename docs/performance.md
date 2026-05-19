@@ -19,7 +19,7 @@ and assertion tests for both script and ESM module cold start:
 | `BenchmarkColdStart_FromSource` | `NewIsolate` + `NewContext` + `RunScript(bundle)` |
 | `BenchmarkColdStart_FromSnapshot` | `NewIsolate(WithSnapshotBlob)` + `NewContext` + probe |
 | `TestSnapshot_ColdStartSpeedup` | Asserts >= 3.5x speedup factor (script path) |
-| `TestSnapshotESM_ColdStartSpeedup` | Asserts >= 3.5x speedup factor (ESM path) |
+| `TestSnapshotESM_ColdStartSpeedup` | Asserts >= 2.5x speedup factor (ESM path) |
 
 The synthetic bundle is ~750 KiB of JavaScript (15,000 named arrow
 functions plus a coordinator). At this size, V8's source parsing and
@@ -277,6 +277,14 @@ ab, _ := v8.NewArrayBufferExternal(ctx, data)
 
 The slice is pinned via `runtime.Pinner` and released automatically when
 V8 garbage-collects the ArrayBuffer or the isolate is disposed.
+
+**Sandbox caveat:** When `V8_ENABLE_SANDBOX` is active (the case with
+current prebuilt deps), V8 requires backing stores to live inside its
+sandbox address space. In this mode, `NewArrayBufferExternal` falls back
+to alloc + `memcpy` — the data is copied in and the Go-side pin is
+released immediately. Use `v8.SandboxEnabled()` to check at runtime.
+Once deps are rebuilt with `v8_enable_sandbox=false`, the zero-copy path
+activates automatically.
 
 ## Fast API callbacks
 

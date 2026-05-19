@@ -35,6 +35,10 @@ The fork-specific C++ files are the most common source of conflicts:
 | `promise_reject.h` / `promise_reject.cc` | _does not exist upstream_ | Promise reject callback trampoline |
 | `interrupt.h` / `interrupt.cc` | _does not exist upstream_ | Interrupt termination + SetIdle wrappers |
 | `gc_callback.h` / `gc_callback.cc` | _does not exist upstream_ | GC prologue/epilogue callback trampolines |
+| `arraybuffer.h` / `arraybuffer.cc` | _does not exist upstream_ | ArrayBuffer creation (copy, alloc, external) with sandbox fallback |
+| `fast_api.h` / `fast_api.cc` | _does not exist upstream_ | V8 Fast API CFunctionInfo builder |
+| `fast_api_test_helpers.cc` | _does not exist upstream_ | Test-only C++ fast function for Fast API tests |
+| `fast_api_test_export.go` | _does not exist upstream_ | CGo bridge to test fast function address |
 | `isolate_registry.go` | _does not exist upstream_ | Global Go-side isolate registry for CGO callback dispatch |
 
 When conflicts appear, resolve them locally, ensure the CI matrix
@@ -98,6 +102,7 @@ The fork extends the upstream C bridge across several areas.
 - `IsolateCancelTerminateExecution` — cancels pending termination
 - `IsolateRequestGarbageCollectionForTesting` — forces GC (testing only)
 - `IsolateContextDisposedNotification` — context disposal hint
+- `IsolateRunIdleTasks` — drives incremental GC and idle work within a deadline
 
 ### Object extensions (`object.h` / `object.cc`)
 
@@ -134,8 +139,16 @@ The fork extends the upstream C bridge across several areas.
 ### ArrayBuffer (`arraybuffer.h` / `arraybuffer.cc`)
 
 - `NewArrayBufferFromBytes` — creates ArrayBuffer with copied data
-- `NewArrayBufferAlloc` — allocates empty ArrayBuffer in V8 sandbox
+- `NewArrayBufferAlloc` — allocates empty ArrayBuffer
+- `NewArrayBufferExternal` — zero-copy external backing store (sandbox fallback to copy)
+- `V8SandboxIsEnabled` — compile-time sandbox detection
 - `ArrayBufferGetData` / `ArrayBufferGetByteLength` / `ArrayBufferGetBackingStore` — accessors
+
+### Fast API (`fast_api.h` / `fast_api.cc`, `function_template.{h,cc}`)
+
+- `BuildCFunctionInfo` — constructs `v8::CFunctionInfo` from C-level type array
+- `FreeCFunctionInfo` — releases the info struct
+- `NewFastFunctionTemplate` — creates FunctionTemplate with CFunction fast path
 
 ### External strings (`external_string.h` / `external_string.cc`)
 
@@ -189,20 +202,14 @@ Two internal repositories depend on this fork:
 
 ### CI guardrails
 
-The `ci.yml` workflow includes `compat-blindfox` and `compat-er` jobs
-that check out the downstream repo, swap its v8go dependency to the PR
-head via `go mod edit -replace`, and run `go build` + `go test -short`.
-This catches API breakage before it reaches main.
+The `ci.yml` workflow runs two jobs — `ci (ubuntu-latest)` and
+`ci (macos-latest)`. Each job runs lint, build, test + coverage, ESM
+flake detection, and downstream compat checks sequentially. The compat
+steps check out blindfox and er, swap in the PR's v8go via
+`go mod edit -replace`, and run `go build` + `go test -short`.
 
-Both jobs require the `CROSS_REPO_READ_TOKEN` secret. Without it they
-skip gracefully — useful for external PRs from forks.
-
-### Automatic downstream bumps
-
-The `auto-bump-downstreams.yml` workflow opens PRs against blindfox
-and er when a new commit lands on main. It is currently gated to
-`workflow_dispatch`; flip the trigger to `push: branches: [main]`
-once both downstreams import `github.com/ChessCom/v8go` directly.
+Compat steps require the `CROSS_REPO_READ_TOKEN` secret. Without it
+they skip gracefully — useful for external PRs from forks.
 
 ## Release process
 
@@ -214,14 +221,13 @@ automation details.
 
 | Secret | Used by | Scope |
 |---|---|---|
-| `CROSS_REPO_READ_TOKEN` | `compat-blindfox`, `compat-er` in `ci.yml` | `repo:read` on ChessCom/blindfox and ChessCom/er |
-| `CROSS_REPO_WRITE_TOKEN` | `auto-bump-downstreams.yml` | `repo:write` (PR open) on ChessCom/blindfox and ChessCom/er |
+| `CROSS_REPO_READ_TOKEN` | compat steps in `ci.yml` | `repo:read` on ChessCom/blindfox and ChessCom/er |
 
-Both should be fine-scoped GitHub App tokens (preferred) or PATs with
-the minimum scopes above. Workflow jobs auto-skip when the secret is
-missing, so PRs from forks degrade gracefully.
+Should be a fine-scoped GitHub App token (preferred) or PAT with the
+minimum scope above. Compat steps auto-skip when the secret is missing,
+so PRs from forks degrade gracefully.
 
-To rotate: create a new token with the same scopes, paste it into
+To rotate: create a new token with the same scope, paste it into
 **Settings > Secrets and variables > Actions** under the matching name,
 and delete the old one.
 
@@ -231,9 +237,7 @@ Configure under **Settings > Branches > main** with:
 
 - Require a pull request before merging (1 approval)
 - Dismiss stale approvals on new commits
-- Required status checks: `unit (ubuntu-latest)`, `unit (macos-latest)`,
-  `vet`, `coverage`
-- Optional (when token is set): `compat-blindfox (*)`, `compat-er (*)`
+- Required status checks: `ci (ubuntu-latest)`, `ci (macos-latest)`
 - Require branches to be up to date before merging
 - Restrict pushes to maintainers only
 

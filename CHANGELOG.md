@@ -7,15 +7,23 @@ increments per ChessCom-side change set.
 
 ## v0.34.0-chess.5 — 2026-05
 
-Warm-path performance: zero-copy ArrayBuffer, V8 Fast API callbacks,
-idle-task GC scheduling, and sandbox removal.
+Warm-path performance: zero-copy ArrayBuffer (with sandbox fallback),
+V8 Fast API callbacks, idle-task GC scheduling, and CI consolidation.
 
 ### Added
 
 * **Zero-copy ArrayBuffer** (`arraybuffer.{h,cc,go}`):
   `NewArrayBufferExternal(ctx, []byte)` creates an ArrayBuffer backed
   directly by Go memory via external BackingStore + `runtime.Pinner`.
-  No `memcpy`, no sandbox allocation — JS and Go share the same bytes.
+  When the V8 sandbox is disabled, JS and Go share the same bytes with
+  no copy. When `V8_ENABLE_SANDBOX` is active (current prebuilt deps),
+  the function falls back to alloc + `memcpy` since the sandbox
+  requires backing stores to reside in its address space.
+
+* **`SandboxEnabled() bool`** (`arraybuffer.go`):
+  Runtime query for whether the V8 binary was compiled with
+  `V8_ENABLE_SANDBOX`. Callers can use this to choose between
+  zero-copy and copy-in strategies.
 
 * **V8 Fast API callbacks** (`fast_api.{h,cc}`, `function_template.{h,cc,go}`):
   `NewFastFunctionTemplate(iso, slowCB, FastCallDescriptor{...})` wires
@@ -29,10 +37,17 @@ idle-task GC scheduling, and sandbox removal.
 
 ### Changed
 
-* **Sandbox disabled** (`cgo.go`, `deps/build.py`):
-  Removed `V8_ENABLE_SANDBOX` / `v8_enable_sandbox` to unlock external
-  BackingStore for true zero-copy. V8 libs must be rebuilt with this
-  change. Node.js ships the same V8 branch without sandbox.
+* **Sandbox status** (`cgo.go`, `deps/build.py`):
+  `V8_ENABLE_SANDBOX` remains active in `cgo.go` to match the prebuilt
+  static libraries. `deps/build.py` sets `v8_enable_sandbox=false` for
+  local rebuilds — once deps are rebuilt without the sandbox, the
+  `NewArrayBufferExternal` zero-copy path activates automatically.
+  `SandboxEnabled()` reports the compile-time state at runtime.
+
+* **CI consolidated** (`.github/workflows/ci.yml`):
+  Collapsed from 10 jobs to 2 (one per OS). Each job runs lint, build,
+  test + coverage, ESM flake detection, and downstream compat checks
+  sequentially. Deleted `auto-bump-downstreams.yml`.
 
 ---
 

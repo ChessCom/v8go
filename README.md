@@ -271,6 +271,16 @@ The ChessCom fork adds:
   observing unhandled promise rejections.
 * **Interrupt and idle** -- `RequestInterrupt` (terminate via interrupt
   mechanism) and `SetIdle` (hint idle state to V8).
+* **Idle-task GC scheduling** -- `RunIdleTasks(deadline)` drives V8's
+  incremental GC sweeper, deopt cleanup, and code aging within a
+  caller-controlled time budget.
+* **Zero-copy ArrayBuffer** -- `NewArrayBufferExternal(ctx, []byte)`
+  wraps Go memory as an ArrayBuffer via external BackingStore +
+  `runtime.Pinner`. Falls back to copy when V8 sandbox is active;
+  `SandboxEnabled()` reports the mode at runtime.
+* **V8 Fast API callbacks** -- `NewFastFunctionTemplate` registers a
+  C-linkage fast path that TurboFan calls directly, bypassing CGo and
+  argument marshaling on hot call sites.
 * **GC lifecycle callbacks** -- `AddGCPrologueCallback` and
   `AddGCEpilogueCallback` for observing GC cycles with typed events.
 

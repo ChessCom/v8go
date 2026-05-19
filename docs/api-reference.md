@@ -397,6 +397,45 @@ sym := v8.SymbolIterator(iso)
 tmpl.SetSymbol(sym, iteratorFn)
 ```
 
+### NewFastFunctionTemplate (V8 Fast API)
+
+Registers a V8 Fast API callback alongside the normal slow-path Go
+callback. When TurboFan optimizes a hot call site and can prove
+argument types match the descriptor, it calls the C function directly
+— bypassing CGo entirely.
+
+```go
+tmpl := v8.NewFastFunctionTemplate(iso, slowCallback, v8.FastCallDescriptor{
+    FastFn:     unsafe.Pointer(C.MyFastAdd),
+    ReturnType: v8.CTypeInt32,
+    ArgTypes:   []v8.CType{v8.CTypeV8Value, v8.CTypeInt32, v8.CTypeInt32},
+})
+```
+
+The first entry in `ArgTypes` must be `CTypeV8Value` (the receiver).
+
+**CType enum:**
+
+```go
+v8.CTypeVoid
+v8.CTypeBool
+v8.CTypeUint8
+v8.CTypeInt32
+v8.CTypeUint32
+v8.CTypeInt64
+v8.CTypeUint64
+v8.CTypeFloat32
+v8.CTypeFloat64
+v8.CTypePointer
+v8.CTypeV8Value
+v8.CTypeOneByteString
+```
+
+**Constraints:**
+- The fast function must be C-linkage (not Go / CGo).
+- It must not allocate on the JS heap or trigger JS execution.
+- Register its address via `AddExternalReference` for snapshot compat.
+
 ## Promises
 
 ### Creating and resolving
@@ -1012,6 +1051,19 @@ iso.SetIdle(true)  // hint that embedder is idle
 iso.SetIdle(false) // back to active
 ```
 
+### RunIdleTasks
+
+Gives V8 a time budget to perform idle-time work such as incremental
+GC sweeping, deoptimization cleanup, and code aging. Call this when
+the embedder is idle (e.g. between SSR requests in a pool). Pair with
+`SetIdle(true)` for best results.
+
+```go
+iso.SetIdle(true)
+iso.RunIdleTasks(0.005) // 5 ms idle window
+iso.SetIdle(false)
+```
+
 ---
 
 ## GC Prologue and Epilogue Callbacks
@@ -1130,6 +1182,35 @@ space. Use `ArrayBufferGetBytes` to populate it without an extra copy.
 ab, _ := v8.NewArrayBufferAlloc(ctx, 1024)
 backing := ab.ArrayBufferGetBytes()
 copy(backing, myData)
+```
+
+### NewArrayBufferExternal
+
+Creates an ArrayBuffer backed directly by a Go byte slice. When the V8
+sandbox is disabled, this is true zero-copy — JS and Go share the same
+memory. When `V8_ENABLE_SANDBOX` is active (current prebuilt deps), it
+falls back to alloc + copy internally. The slice is pinned via
+`runtime.Pinner` and released when V8 GCs the ArrayBuffer.
+
+```go
+data := make([]byte, 64*1024)
+ab, _ := v8.NewArrayBufferExternal(ctx, data)
+// With sandbox disabled: JS reads/writes `data` directly.
+// With sandbox enabled: V8 copies data in; subsequent mutations
+// to the Go slice are NOT visible in JS.
+```
+
+### SandboxEnabled
+
+Reports whether the V8 binary was compiled with `V8_ENABLE_SANDBOX`.
+Use this to decide between zero-copy and copy-in strategies at runtime.
+
+```go
+if v8.SandboxEnabled() {
+    // External ArrayBuffer will copy; use NewArrayBufferAlloc + write instead
+} else {
+    // True zero-copy via NewArrayBufferExternal
+}
 ```
 
 ### ArrayBufferGetBytes / ArrayBufferByteLength

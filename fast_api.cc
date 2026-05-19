@@ -1,6 +1,8 @@
 #include "deps/include/v8-fast-api-calls.h"
 #include "fast_api.h"
 
+#include <new>
+
 using namespace v8;
 
 static CTypeInfo::Type toCTypeInfoType(CTypeInfoType t) {
@@ -41,9 +43,10 @@ CFunctionInfoPtr BuildCFunctionInfo(CTypeInfoType return_type,
                                     int arg_count) {
   CTypeInfo ret_info(toCTypeInfoType(return_type));
 
-  CTypeInfo* args = new CTypeInfo[arg_count];
+  CTypeInfo* args = static_cast<CTypeInfo*>(
+      ::operator new(sizeof(CTypeInfo) * arg_count));
   for (int i = 0; i < arg_count; i++) {
-    args[i] = CTypeInfo(toCTypeInfoType(arg_types[i]));
+    new (&args[i]) CTypeInfo(toCTypeInfoType(arg_types[i]));
   }
 
   CFunctionInfo* info = new CFunctionInfo(ret_info, arg_count, args);

@@ -32,7 +32,7 @@ jobs:
           - runner: macos-latest
             target_os: darwin
             target_arch: arm64
-          - runner: macos-13
+          - runner: macos-latest
             target_os: darwin
             target_arch: amd64
     timeout-minutes: 120

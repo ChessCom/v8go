@@ -103,13 +103,14 @@ jobs:
         run: |
           total=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}' | tr -d '%')
           echo "Total coverage: ${total}%"
-          # Threshold is 94%: the remaining ~5-6% consists of defensive
+          # Threshold is 93%: the remaining ~7% consists of defensive
           # nil-guard paths in CGo export trampolines, OOM/near-heap-limit
           # callbacks that require actual V8 resource exhaustion to trigger,
-          # GC finalizers, and process-global registry branches that cannot
-          # be reached through the public Go API.
-          if [ "$(echo "$total < 94.0" | bc)" -eq 1 ]; then
-            echo "FAIL: coverage is ${total}%, required >= 94%"
+          # GC finalizers, sandbox-gated zero-copy paths (skipped when
+          # V8_ENABLE_SANDBOX is active), and process-global registry
+          # branches that cannot be reached through the public Go API.
+          if [ "$(echo "$total < 93.0" | bc)" -eq 1 ]; then
+            echo "FAIL: coverage is ${total}%, required >= 93%"
             echo ""
             echo "Uncovered functions:"
             go tool cover -func=coverage.out | grep -v '100.0%'

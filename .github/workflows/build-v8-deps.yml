@@ -97,11 +97,15 @@ jobs:
           mkdir -p deps/.build/${{ matrix.target_os }}_${{ matrix.target_arch }}
           TARGET_CPU=${{ matrix.target_arch == 'amd64' && 'x64' || 'arm64' }}
 
-          # Use V8's bundled sysroot + libcxx for cross-compilation (linux/arm64 from x86_64)
+          # Use V8's bundled sysroot for linux cross-compilation;
+          # use custom libcxx for all cross-compiles to avoid system header conflicts
           USE_SYSROOT="false"
           USE_CUSTOM_LIBCXX="false"
           if [[ "${{ matrix.target_os }}" == "linux" && "${{ matrix.target_arch }}" == "arm64" ]]; then
             USE_SYSROOT="true"
+            USE_CUSTOM_LIBCXX="true"
+          fi
+          if [[ "${{ matrix.target_os }}" == "darwin" && "${{ matrix.target_arch }}" == "amd64" ]]; then
             USE_CUSTOM_LIBCXX="true"
           fi
 

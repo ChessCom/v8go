@@ -58,6 +58,77 @@ not yet mirrored in the deps modules. In that case, close the
 automated PR with a comment explaining the skip and reopen manually
 once the deps are updated.
 
+## Local V8 rebuild (escape hatch)
+
+When CI is unavailable, too slow, or you need to iterate on V8 build
+flags locally, use the local build system. It builds V8 monolith for
+all 4 platforms from a single macOS (Apple Silicon) machine.
+
+### Prerequisites
+
+- macOS with Xcode Command Line Tools (`xcode-select --install`)
+- Docker Desktop with "Use Rosetta for x86\_64/amd64 emulation" enabled
+- ~20 GB free disk (V8 source + build artifacts)
+- ~16 GB RAM recommended
+
+### Quick start
+
+```bash
+# Build all 4 platforms (~45 min with parallelism)
+make v8-deps-all
+
+# Or build a single platform
+make v8-deps-darwin-arm64
+make v8-deps-linux-amd64
+```
+
+The orchestration script (`deps/build-all-local.sh`) handles:
+1. Fetching `depot_tools` and V8 source (first run only, cached after)
+2. Building darwin targets natively (cross-compile for amd64)
+3. Building linux targets in Docker containers (arm64 native, amd64 via Rosetta)
+4. Regenerating `cgo_*.go` files via `update_cgo.py`
+
+### How it works
+
+| Target | Method |
+|--------|--------|
+| darwin/arm64 | Native build via V8's bundled clang |
+| darwin/amd64 | Native cross-compile (`target_cpu="x64"`) |
+| linux/arm64 | Docker `--platform linux/arm64` (native on Apple Silicon) |
+| linux/amd64 | Docker `--platform linux/amd64` (Rosetta emulation, ~2x slower) |
+
+The V8 source (~10 GB) is fetched once to `deps/v8/` and shared
+across all builds (bind-mounted into Docker containers).
+
+### After building
+
+```bash
+# Remove sandbox define (if rebuilding to disable sandbox)
+sed -i '' 's/ -DV8_ENABLE_SANDBOX//' cgo.go
+
+# Update go.mod to use local deps
+for p in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+  go mod edit -droprequire="github.com/tommie/v8go/deps/$p" || true
+  go mod edit -require="github.com/ChessCom/v8go/deps/${p}@v0.0.0"
+  go mod edit -replace="github.com/ChessCom/v8go/deps/${p}=./deps/${p}"
+done
+go mod tidy
+
+# Verify
+go build ./...
+go test -count=1 -timeout 5m ./...
+```
+
+### Files involved
+
+| File | Purpose |
+|------|---------|
+| `deps/build-all-local.sh` | Orchestration script |
+| `deps/build.py` | Per-platform V8 build (gclient, gn, ninja) |
+| `deps/Dockerfile.builder` | Docker image for linux builds |
+| `deps/update_cgo.py` | Regenerates cgo Go files from libmanifest |
+| `Makefile` | Convenience targets (`v8-deps-*`) |
+
 ## V8 binary upgrades
 
 The prebuilt `libv8.a` static libraries live in the deps submodules

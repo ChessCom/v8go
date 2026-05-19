@@ -129,6 +129,12 @@ jobs:
           v8_android_log_stdout=true
           EOF
 
+      - name: install sysroot (linux/arm64 cross-compile)
+        if: matrix.target_os == 'linux' && matrix.target_arch == 'arm64'
+        working-directory: deps/v8
+        run: |
+          python3 build/linux/sysroot_scripts/install-sysroot.py --arch=arm64
+
       - name: run gn gen
         working-directory: deps/v8
         run: |

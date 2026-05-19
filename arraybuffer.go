@@ -8,6 +8,13 @@ import (
 	"unsafe"
 )
 
+// SandboxEnabled reports whether V8 was compiled with V8_ENABLE_SANDBOX.
+// When the sandbox is active, NewArrayBufferExternal falls back to a copy
+// because backing stores must live inside the sandbox address space.
+func SandboxEnabled() bool {
+	return C.V8SandboxIsEnabled() != 0
+}
+
 // NewArrayBuffer creates a new ArrayBuffer in the given context, copying the
 // provided Go byte slice into V8's heap. The Go slice can be freed or
 // modified after this call without affecting the ArrayBuffer contents.

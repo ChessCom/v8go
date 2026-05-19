@@ -31,6 +31,8 @@ extern void* ArrayBufferGetData(ValuePtr ptr);
 extern size_t ArrayBufferGetByteLength(ValuePtr ptr);
 extern BackingStorePtr ArrayBufferGetBackingStore(ValuePtr ptr);
 
+extern int V8SandboxIsEnabled();
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

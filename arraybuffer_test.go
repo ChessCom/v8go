@@ -161,6 +161,10 @@ func TestNewArrayBufferExternal_ZeroCopy(t *testing.T) {
 }
 
 func TestNewArrayBufferExternal_SharedMemory(t *testing.T) {
+	if v8.SandboxEnabled() {
+		t.Skip("sandbox enabled: external ArrayBuffer falls back to copy")
+	}
+
 	ctx := v8.NewContext()
 	defer ctx.Close()
 
@@ -184,6 +188,10 @@ func TestNewArrayBufferExternal_SharedMemory(t *testing.T) {
 }
 
 func TestNewArrayBufferExternal_JSWritesGoMemory(t *testing.T) {
+	if v8.SandboxEnabled() {
+		t.Skip("sandbox enabled: external ArrayBuffer falls back to copy")
+	}
+
 	ctx := v8.NewContext()
 	defer ctx.Close()
 

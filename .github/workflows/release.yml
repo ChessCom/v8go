@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     name: validate tag
-    runs-on: ubuntu-latest
+    runs-on: base-default
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [base-default, self-hosted-mac-mini]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -48,7 +48,7 @@ jobs:
   coverage:
     name: coverage
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: base-default
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -69,7 +69,7 @@ jobs:
   release:
     name: github release
     needs: [validate, ci, coverage]
-    runs-on: ubuntu-latest
+    runs-on: base-default
     steps:
       - uses: actions/checkout@v4
       - name: extract release notes
@@ -95,8 +95,3 @@ jobs:
           draft: false
           prerelease: false
 
-  bump-downstreams:
-    name: bump downstreams
-    needs: [validate, release]
-    uses: ./.github/workflows/auto-bump-downstreams.yml
-    secrets: inherit

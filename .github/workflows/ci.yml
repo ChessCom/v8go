@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [base-default, self-hosted-mac-mini]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [base-default, self-hosted-mac-mini]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -45,7 +45,7 @@ jobs:
 
   vet:
     name: vet (gofmt + go vet + clang-format)
-    runs-on: ubuntu-latest
+    runs-on: base-default
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -90,7 +90,7 @@ jobs:
 
   coverage:
     name: coverage
-    runs-on: ubuntu-latest
+    runs-on: base-default
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -127,7 +127,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [base-default, self-hosted-mac-mini]
     steps:
       - name: gate on token
         id: gate
@@ -189,7 +189,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [base-default, self-hosted-mac-mini]
     steps:
       - name: gate on token
         id: gate

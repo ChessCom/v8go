@@ -2,6 +2,7 @@
 #define V8GO_FUNCTION_TEMPLATE_H
 
 #include "errors.h"
+#include "fast_api.h"
 
 #ifdef __cplusplus
 
@@ -26,6 +27,10 @@ typedef struct m_template m_template;
 typedef struct m_ctx m_ctx;
 
 extern m_template* NewFunctionTemplate(v8Isolate* iso_ptr, int callback_ref);
+extern m_template* NewFastFunctionTemplate(v8Isolate* iso_ptr,
+                                           int callback_ref,
+                                           const void* fast_fn,
+                                           CFunctionInfoPtr fn_info);
 extern RtnValue FunctionTemplateGetFunction(m_template* ptr, m_ctx* ctx_ptr);
 extern m_template* FunctionTemplateInstanceTemplate(m_template* ptr);
 extern m_template* FunctionTemplatePrototypeTemplate(m_template* ptr);

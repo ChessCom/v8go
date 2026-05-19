@@ -259,6 +259,15 @@ func (i *Isolate) EnqueueMicrotask(fn *Function) {
 	C.IsolateEnqueueMicrotask(i.ptr, fn.ptr)
 }
 
+// RunIdleTasks gives V8 a time budget to perform idle-time work such as
+// incremental GC sweeping, deoptimization cleanup, and code aging. Call
+// this when the embedder is idle (e.g. between SSR requests in a pool).
+// The deadline is in seconds (e.g. 0.005 for a 5 ms idle window).
+// Pair with SetIdle(true) for best results.
+func (i *Isolate) RunIdleTasks(deadlineSeconds float64) {
+	C.IsolateRunIdleTasks(i.ptr, C.double(deadlineSeconds))
+}
+
 type CompileOptions struct {
 	CachedData *CompilerCachedData
 

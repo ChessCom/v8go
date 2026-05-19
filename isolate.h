@@ -82,6 +82,7 @@ extern int64_t IsolateAdjustExternalMemory(IsolatePtr ptr,
                                            int64_t change_in_bytes);
 extern void IsolateSetMicrotasksPolicy(IsolatePtr ptr, int policy);
 extern void IsolateEnqueueMicrotask(IsolatePtr ptr, ValuePtr fn_ptr);
+extern void IsolateRunIdleTasks(IsolatePtr ptr, double idle_time_in_seconds);
 
 #ifdef __cplusplus
 }  // extern "C"

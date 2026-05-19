@@ -20,6 +20,13 @@ extern ValuePtr NewArrayBufferFromBytes(ContextPtr ctx_ptr,
 extern ValuePtr NewArrayBufferAlloc(ContextPtr ctx_ptr,
                                     size_t byte_length);
 
+// Zero-copy: wraps external (Go-owned) memory as an ArrayBuffer.
+// The deleter_ref is passed back to Go when V8 releases the backing store.
+extern ValuePtr NewArrayBufferExternal(ContextPtr ctx_ptr,
+                                       void* data,
+                                       size_t byte_length,
+                                       int deleter_ref);
+
 extern void* ArrayBufferGetData(ValuePtr ptr);
 extern size_t ArrayBufferGetByteLength(ValuePtr ptr);
 extern BackingStorePtr ArrayBufferGetBackingStore(ValuePtr ptr);

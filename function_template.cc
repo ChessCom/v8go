@@ -1,6 +1,7 @@
 #include "_cgo_export.h"
 
 #include "deps/include/v8-context.h"
+#include "deps/include/v8-fast-api-calls.h"
 #include "deps/include/v8-function.h"
 #include "isolate-macros.h"
 #include "template-macros.h"
@@ -71,6 +72,33 @@ TemplatePtr NewFunctionTemplate(IsolatePtr iso, int callback_ref) {
   // embedder Global<Template> before serialisation; doing so on every
   // regular isolate would expose the vector to concurrent NewFunctionTemplate
   // races and is unnecessary outside the snapshot pipeline.
+  if (auto* iso_ctx = static_cast<m_ctx*>(iso->GetData(0))) {
+    if (iso_ctx->track_templates) {
+      iso_ctx->templates.push_back(ot);
+    }
+  }
+  return ot;
+}
+
+TemplatePtr NewFastFunctionTemplate(IsolatePtr iso, int callback_ref,
+                                    const void* fast_fn,
+                                    CFunctionInfoPtr fn_info) {
+  Locker locker(iso);
+  Isolate::Scope isolate_scope(iso);
+  HandleScope handle_scope(iso);
+
+  Local<Integer> cbData = Integer::New(iso, callback_ref);
+
+  CFunction c_func(fast_fn, static_cast<const CFunctionInfo*>(fn_info));
+
+  m_template* ot = new m_template;
+  ot->iso = iso;
+  ot->ptr.Reset(iso, FunctionTemplate::New(
+                          iso, FunctionTemplateCallback, cbData,
+                          Local<Signature>(), 0,
+                          ConstructorBehavior::kThrow,
+                          SideEffectType::kHasSideEffect, &c_func));
+
   if (auto* iso_ctx = static_cast<m_ctx*>(iso->GetData(0))) {
     if (iso_ctx->track_templates) {
       iso_ctx->templates.push_back(ot);

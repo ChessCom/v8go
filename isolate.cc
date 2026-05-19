@@ -13,7 +13,8 @@
 
 using namespace v8;
 
-auto default_platform = platform::NewDefaultPlatform();
+auto default_platform =
+    platform::NewDefaultPlatform(0, platform::IdleTaskSupport::kEnabled);
 ArrayBuffer::Allocator* default_allocator;
 
 extern "C" {
@@ -238,5 +239,9 @@ void IsolateEnqueueMicrotask(IsolatePtr iso, ValuePtr fn_ptr) {
   Local<Value> local_val = val->ptr.Get(iso);
   Local<Function> fn = Local<Function>::Cast(local_val);
   iso->EnqueueMicrotask(fn);
+}
+
+void IsolateRunIdleTasks(IsolatePtr iso, double idle_time_in_seconds) {
+  platform::RunIdleTasks(default_platform.get(), iso, idle_time_in_seconds);
 }
 }

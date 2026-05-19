@@ -5,6 +5,37 @@ follow `vMAJOR.MINOR.PATCH-chess.N`, where `MAJOR.MINOR.PATCH` mirrors
 the upstream `tommie/v8go` version this fork tracks and `chess.N`
 increments per ChessCom-side change set.
 
+## v0.34.0-chess.5 — 2026-05
+
+Warm-path performance: zero-copy ArrayBuffer, V8 Fast API callbacks,
+idle-task GC scheduling, and sandbox removal.
+
+### Added
+
+* **Zero-copy ArrayBuffer** (`arraybuffer.{h,cc,go}`):
+  `NewArrayBufferExternal(ctx, []byte)` creates an ArrayBuffer backed
+  directly by Go memory via external BackingStore + `runtime.Pinner`.
+  No `memcpy`, no sandbox allocation — JS and Go share the same bytes.
+
+* **V8 Fast API callbacks** (`fast_api.{h,cc}`, `function_template.{h,cc,go}`):
+  `NewFastFunctionTemplate(iso, slowCB, FastCallDescriptor{...})` wires
+  a C-linkage fast path directly into TurboFan-compiled code. Bypasses
+  CGo, argument marshaling, and `m_value` allocation on hot paths.
+
+* **Idle-task GC scheduling** (`isolate.{h,cc,go}`):
+  `RunIdleTasks(deadlineSeconds)` drives V8's incremental GC sweeper,
+  deopt cleanup, and code aging within a caller-controlled time budget.
+  Platform now initialized with `IdleTaskSupport::kEnabled`.
+
+### Changed
+
+* **Sandbox disabled** (`cgo.go`, `deps/build.py`):
+  Removed `V8_ENABLE_SANDBOX` / `v8_enable_sandbox` to unlock external
+  BackingStore for true zero-copy. V8 libs must be rebuilt with this
+  change. Node.js ships the same V8 branch without sandbox.
+
+---
+
 ## v0.34.0-chess.4 — 2026-05
 
 ESM snapshot support: evaluate ES modules inside SnapshotCreator and

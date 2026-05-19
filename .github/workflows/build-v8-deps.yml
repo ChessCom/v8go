@@ -1,0 +1,261 @@
+name: build-v8-deps
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_pr:
+        description: 'Create a PR with rebuilt deps'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  V8_HASH_FILE: deps/v8_hash
+
+jobs:
+  build:
+    name: build (${{ matrix.target_os }}/${{ matrix.target_arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target_os: linux
+            target_arch: amd64
+          - runner: ubuntu-24.04-arm
+            target_os: linux
+            target_arch: arm64
+          - runner: macos-latest
+            target_os: darwin
+            target_arch: arm64
+          - runner: macos-13
+            target_os: darwin
+            target_arch: amd64
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: read V8 commit hash
+        id: v8hash
+        run: echo "hash=$(cat $V8_HASH_FILE)" >> "$GITHUB_OUTPUT"
+
+      - name: cache V8 source
+        uses: actions/cache@v4
+        with:
+          path: deps/v8
+          key: v8-source-${{ steps.v8hash.outputs.hash }}
+
+      - name: install depot_tools
+        run: |
+          git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git deps/depot_tools
+          echo "$GITHUB_WORKSPACE/deps/depot_tools" >> $GITHUB_PATH
+
+      - name: fetch V8 source
+        working-directory: deps
+        run: |
+          V8_HASH=$(cat v8_hash)
+          if [ ! -d v8/.git ]; then
+            mkdir -p v8
+            cd v8
+            git init
+            git remote add origin https://chromium.googlesource.com/v8/v8.git
+            git fetch --depth=1 origin "$V8_HASH"
+            git checkout FETCH_HEAD
+            cd ..
+          fi
+          cat > .gclient << 'EOF'
+          solutions = [
+            {
+              "name": "v8",
+              "url": "https://chromium.googlesource.com/v8/v8.git",
+              "deps_file": "DEPS",
+              "managed": False,
+              "custom_deps": {
+                "v8/testing/gmock": None,
+                "v8/test/wasm-js": None,
+                "v8/third_party/colorama/src": None,
+                "v8/tools/gyp": None,
+                "v8/tools/luci-go": None,
+                "v8/third_party/catapult": None,
+                "v8/third_party/android_tools": None,
+              },
+              "custom_vars": {
+                "build_for_node": True,
+              },
+            },
+          ]
+          target_os = ["${{ matrix.target_os == 'darwin' && 'mac' || matrix.target_os }}"]
+          EOF
+          gclient sync --delete_unversioned_trees --no-history
+
+      - name: generate build args
+        run: |
+          mkdir -p deps/.build/${{ matrix.target_os }}_${{ matrix.target_arch }}
+          TARGET_CPU=${{ matrix.target_arch == 'amd64' && 'x64' || 'arm64' }}
+          cat > /tmp/gn_args.txt << EOF
+          is_debug=false
+          is_clang=${{ matrix.target_os != 'linux' && 'true' || 'true' }}
+          target_os="${{ matrix.target_os == 'darwin' && 'mac' || matrix.target_os }}"
+          target_cpu="${TARGET_CPU}"
+          v8_target_cpu="${TARGET_CPU}"
+          clang_use_chrome_plugins=false
+          use_custom_libcxx=false
+          use_sysroot=false
+          use_glib=false
+          symbol_level=0
+          strip_debug_info=true
+          is_component_build=false
+          v8_monolithic=true
+          v8_use_external_startup_data=false
+          treat_warnings_as_errors=false
+          v8_embedder_string="-v8go"
+          v8_enable_gdbjit=false
+          v8_enable_i18n_support=true
+          icu_use_data_file=false
+          v8_enable_test_features=false
+          v8_enable_sandbox=false
+          exclude_unwind_tables=true
+          v8_android_log_stdout=true
+          EOF
+
+      - name: run gn gen
+        working-directory: deps/v8
+        run: |
+          gn gen "$GITHUB_WORKSPACE/deps/.build/${{ matrix.target_os }}_${{ matrix.target_arch }}" \
+            --args="$(cat /tmp/gn_args.txt | tr '\n' ' ')"
+
+      - name: build V8 monolith
+        working-directory: deps/v8
+        run: |
+          ninja -C "$GITHUB_WORKSPACE/deps/.build/${{ matrix.target_os }}_${{ matrix.target_arch }}" v8_monolith
+
+      - name: split archive
+        run: |
+          python3 -c "
+          import sys, os
+          sys.path.insert(0, 'deps')
+          os.chdir('deps')
+
+          # Minimal mock of args for split_ar
+          class Args:
+              verbose = True
+              os = '${{ matrix.target_os }}'
+              arch = '${{ matrix.target_arch }}'
+              max_file_size = int(40e6)
+          import build
+          build.args = Args()
+          build.v8_path = os.path.join(os.getcwd(), 'v8')
+          build.is_clang = True
+
+          dest_path = os.path.join(os.getcwd(), '${{ matrix.target_os }}_${{ matrix.target_arch }}')
+          os.makedirs(dest_path, exist_ok=True)
+          dest_obj_dn = os.path.join(dest_path, 'obj')
+          import shutil
+          try:
+              build.split_ar(
+                  os.path.join(os.getcwd(), '.build', '${{ matrix.target_os }}_${{ matrix.target_arch }}', 'obj', 'libv8_monolith.a'),
+                  os.path.join(dest_path, 'libv8.a'),
+                  dest_obj_dn)
+          finally:
+              if os.path.exists(dest_obj_dn):
+                  shutil.rmtree(dest_obj_dn)
+          "
+
+      - name: upload platform deps
+        uses: actions/upload-artifact@v4
+        with:
+          name: deps-${{ matrix.target_os }}_${{ matrix.target_arch }}
+          path: deps/${{ matrix.target_os }}_${{ matrix.target_arch }}/
+          retention-days: 7
+
+  assemble:
+    name: assemble deps and open PR
+    needs: build
+    runs-on: ubuntu-latest
+    if: inputs.create_pr
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deps-*
+          path: deps/
+
+      - name: rename artifact dirs
+        run: |
+          cd deps
+          for dir in deps-*; do
+            target="${dir#deps-}"
+            rm -rf "$target"
+            mv "$dir" "$target"
+          done
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: regenerate cgo files
+        run: |
+          python3 deps/update_cgo.py \
+            --root-module="github.com/ChessCom/v8go" \
+            --manifest-paths="deps/*_*/libmanifest"
+
+      - name: update go.mod to use local deps
+        run: |
+          # Drop old tommie/v8go/deps requires
+          for mod in $(grep 'github.com/tommie/v8go/deps/' go.mod | awk '{print $1}'); do
+            go mod edit -droprequire="$mod"
+          done
+
+          # Add local replace directives
+          for dir in deps/linux_amd64 deps/linux_arm64 deps/darwin_amd64 deps/darwin_arm64; do
+            platform=$(basename "$dir")
+            go mod edit -require="github.com/ChessCom/v8go/deps/${platform}@v0.0.0"
+            go mod edit -replace="github.com/ChessCom/v8go/deps/${platform}=./${dir}"
+          done
+
+          go mod tidy || true
+
+      - name: remove V8_ENABLE_SANDBOX from cgo.go
+        run: |
+          sed -i 's/ -DV8_ENABLE_SANDBOX//' cgo.go
+
+      - name: create PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="rebuild-v8-deps-no-sandbox"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "deps: rebuild V8 monolith with v8_enable_sandbox=false
+
+          Rebuilt from V8 commit $(cat deps/v8_hash) using the
+          build-v8-deps workflow. Removes V8_ENABLE_SANDBOX from cgo.go
+          so NewArrayBufferExternal uses the true zero-copy path.
+
+          Updates go.mod to use local dep modules under deps/."
+          git push -u origin "$BRANCH" --force
+          gh pr create \
+            --title "deps: rebuild V8 without sandbox (enables zero-copy ArrayBuffer)" \
+            --body "$(cat <<'EOF'
+          ## Summary
+
+          - Rebuilt V8 monolith for all 4 platforms with `v8_enable_sandbox=false`
+          - Removed `-DV8_ENABLE_SANDBOX` from `cgo.go`
+          - Switched to local dep modules under `deps/{os}_{arch}/`
+          - `SandboxEnabled()` now returns `false`
+          - `NewArrayBufferExternal` uses true zero-copy (no memcpy fallback)
+
+          ## Test plan
+
+          - [ ] CI passes (unit tests on both OS)
+          - [ ] `TestNewArrayBufferExternal_SharedMemory` no longer skipped
+          - [ ] `TestNewArrayBufferExternal_JSWritesGoMemory` no longer skipped
+          - [ ] Downstream compat (blindfox, er) still builds
+          EOF
+          )"

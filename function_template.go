@@ -14,18 +14,18 @@ import (
 type CType int
 
 const (
-	CTypeVoid            CType = C.kCTypeVoid
-	CTypeBool            CType = C.kCTypeBool
-	CTypeUint8           CType = C.kCTypeUint8
-	CTypeInt32           CType = C.kCTypeInt32
-	CTypeUint32          CType = C.kCTypeUint32
-	CTypeInt64           CType = C.kCTypeInt64
-	CTypeUint64          CType = C.kCTypeUint64
-	CTypeFloat32         CType = C.kCTypeFloat32
-	CTypeFloat64         CType = C.kCTypeFloat64
-	CTypePointer         CType = C.kCTypePointer
-	CTypeV8Value         CType = C.kCTypeV8Value
-	CTypeOneByteString   CType = C.kCTypeSeqOneByteString
+	CTypeVoid          CType = C.kCTypeVoid
+	CTypeBool          CType = C.kCTypeBool
+	CTypeUint8         CType = C.kCTypeUint8
+	CTypeInt32         CType = C.kCTypeInt32
+	CTypeUint32        CType = C.kCTypeUint32
+	CTypeInt64         CType = C.kCTypeInt64
+	CTypeUint64        CType = C.kCTypeUint64
+	CTypeFloat32       CType = C.kCTypeFloat32
+	CTypeFloat64       CType = C.kCTypeFloat64
+	CTypePointer       CType = C.kCTypePointer
+	CTypeV8Value       CType = C.kCTypeV8Value
+	CTypeOneByteString CType = C.kCTypeSeqOneByteString
 )
 
 // FastCallDescriptor describes the signature of a V8 Fast API callback.

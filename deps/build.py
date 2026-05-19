@@ -75,6 +75,7 @@ target_cpu="%s"
 v8_target_cpu="%s"
 clang_use_chrome_plugins=false
 use_custom_libcxx=false
+use_thin_lto=false
 use_sysroot=false
 use_glib=false
 symbol_level=%s

@@ -118,6 +118,7 @@ jobs:
           clang_use_chrome_plugins=false
           use_custom_libcxx=${USE_CUSTOM_LIBCXX}
           use_sysroot=${USE_SYSROOT}
+          use_thin_lto=false
           use_glib=false
           symbol_level=0
           strip_debug_info=true

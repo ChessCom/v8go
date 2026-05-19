@@ -92,10 +92,24 @@ jobs:
           EOF
           gclient sync --delete_unversioned_trees --no-history
 
+      - name: install cross-compile deps (linux/arm64)
+        if: matrix.target_os == 'linux' && matrix.target_arch == 'arm64'
+        run: |
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y binutils-aarch64-linux-gnu
+
       - name: generate build args
         run: |
           mkdir -p deps/.build/${{ matrix.target_os }}_${{ matrix.target_arch }}
           TARGET_CPU=${{ matrix.target_arch == 'amd64' && 'x64' || 'arm64' }}
+
+          # Use V8's bundled sysroot for cross-compilation (linux/arm64 from x86_64)
+          USE_SYSROOT="false"
+          if [[ "${{ matrix.target_os }}" == "linux" && "${{ matrix.target_arch }}" == "arm64" ]]; then
+            USE_SYSROOT="true"
+          fi
+
           cat > /tmp/gn_args.txt << EOF
           is_debug=false
           is_clang=${{ matrix.target_os != 'linux' && 'true' || 'true' }}
@@ -104,7 +118,7 @@ jobs:
           v8_target_cpu="${TARGET_CPU}"
           clang_use_chrome_plugins=false
           use_custom_libcxx=false
-          use_sysroot=false
+          use_sysroot=${USE_SYSROOT}
           use_glib=false
           symbol_level=0
           strip_debug_info=true

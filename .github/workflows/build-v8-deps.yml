@@ -26,7 +26,7 @@ jobs:
           - runner: ubuntu-latest
             target_os: linux
             target_arch: amd64
-          - runner: ubuntu-24.04-arm
+          - runner: ubuntu-latest
             target_os: linux
             target_arch: arm64
           - runner: macos-latest

@@ -11,3 +11,14 @@ coverage.out
 .idea/
 .vscode/
 .cursor
+
+# V8 local build artifacts (gclient/depot_tools)
+deps/.cipd/
+deps/.gclient_entries
+deps/.gclient_previous_*
+deps/.gcs_entries
+deps/__pycache__/
+deps/_bad_scm/
+deps/v8/
+deps/depot_tools/
+deps/.build/

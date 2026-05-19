@@ -1,3 +1,5 @@
+#include "_cgo_export.h"
+
 #include "deps/include/v8-array-buffer.h"
 #include "deps/include/v8-context.h"
 #include "deps/include/v8-isolate.h"
@@ -9,6 +11,12 @@
 #include "value.h"
 
 using namespace v8;
+
+static void externalBackingStoreDeleter(void* data, size_t length,
+                                        void* deleter_data) {
+  int ref = static_cast<int>(reinterpret_cast<intptr_t>(deleter_data));
+  goReleaseExternalArrayBuffer(ref);
+}
 
 extern "C" {
 
@@ -44,6 +52,45 @@ ValuePtr NewArrayBufferAlloc(ContextPtr ctx_ptr,
   val->ctx = ctx_ptr;
   val->ptr.Reset(iso, ab);
   return tracked_value(ctx_ptr, val);
+}
+
+ValuePtr NewArrayBufferExternal(ContextPtr ctx_ptr,
+                                void* data,
+                                size_t byte_length,
+                                int deleter_ref) {
+  LOCAL_CONTEXT(ctx_ptr);
+
+#ifdef V8_ENABLE_SANDBOX
+  // With the V8 sandbox enabled, backing stores must live inside the sandbox
+  // address space. Fall back to alloc + memcpy, then immediately release the
+  // Go-side pin since we no longer reference the external memory.
+  auto backing = ArrayBuffer::NewBackingStore(iso, byte_length);
+  if (data != nullptr && byte_length > 0) {
+    memcpy(backing->Data(), data, byte_length);
+  }
+  goReleaseExternalArrayBuffer(deleter_ref);
+#else
+  auto backing = ArrayBuffer::NewBackingStore(
+      data, byte_length, externalBackingStoreDeleter,
+      reinterpret_cast<void*>(static_cast<intptr_t>(deleter_ref)));
+#endif
+
+  Local<ArrayBuffer> ab = ArrayBuffer::New(iso, std::move(backing));
+
+  m_value* val = new m_value;
+  val->id = 0;
+  val->iso = iso;
+  val->ctx = ctx_ptr;
+  val->ptr.Reset(iso, ab);
+  return tracked_value(ctx_ptr, val);
+}
+
+int V8SandboxIsEnabled() {
+#ifdef V8_ENABLE_SANDBOX
+  return 1;
+#else
+  return 0;
+#endif
 }
 
 void* ArrayBufferGetData(ValuePtr ptr) {

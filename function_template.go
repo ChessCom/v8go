@@ -2,12 +2,41 @@ package v8go
 
 // #include <stdlib.h>
 // #include "function_template.h"
+// #include "fast_api.h"
 import "C"
 import (
 	"fmt"
 	"runtime"
 	"unsafe"
 )
+
+// CType represents V8 Fast API argument/return types.
+type CType int
+
+const (
+	CTypeVoid          CType = C.kCTypeVoid
+	CTypeBool          CType = C.kCTypeBool
+	CTypeUint8         CType = C.kCTypeUint8
+	CTypeInt32         CType = C.kCTypeInt32
+	CTypeUint32        CType = C.kCTypeUint32
+	CTypeInt64         CType = C.kCTypeInt64
+	CTypeUint64        CType = C.kCTypeUint64
+	CTypeFloat32       CType = C.kCTypeFloat32
+	CTypeFloat64       CType = C.kCTypeFloat64
+	CTypePointer       CType = C.kCTypePointer
+	CTypeV8Value       CType = C.kCTypeV8Value
+	CTypeOneByteString CType = C.kCTypeSeqOneByteString
+)
+
+// FastCallDescriptor describes the signature of a V8 Fast API callback.
+// FastFn is a C-linkage function pointer (unsafe.Pointer to a C function).
+// ReturnType describes the return type. ArgTypes describes the parameter
+// types (the first entry must be CTypeV8Value for the receiver).
+type FastCallDescriptor struct {
+	FastFn     unsafe.Pointer
+	ReturnType CType
+	ArgTypes   []CType
+}
 
 // FunctionCallback is a callback that is executed in Go when a function is executed in JS.
 type FunctionCallback func(info *FunctionCallbackInfo) *Value
@@ -97,6 +126,59 @@ func NewFunctionTemplateWithError(
 
 	tmpl := &template{
 		ptr: C.NewFunctionTemplate(iso.ptr, C.int(cbref)),
+		iso: iso,
+	}
+	runtime.SetFinalizer(tmpl, (*template).finalizer)
+	return &FunctionTemplate{tmpl}
+}
+
+// NewFastFunctionTemplate creates a FunctionTemplate with a V8 Fast API path.
+// When TurboFan can prove the argument types match the descriptor at compile
+// time, it calls the C function directly — bypassing the generic slow callback,
+// CGo overhead, and all argument marshaling. The slow callback is still used
+// for unoptimized calls and when types don't match.
+//
+// The fast function must:
+//   - Be a C-linkage function (not a Go function)
+//   - Not allocate on the JS heap
+//   - Not trigger JS execution
+//   - Be registered in the external_references array for snapshot compatibility
+//
+// The first argument of the fast function is always the receiver
+// (v8::Local<v8::Object>).
+func NewFastFunctionTemplate(
+	iso *Isolate,
+	slowCallback FunctionCallbackWithError,
+	fast FastCallDescriptor,
+) *FunctionTemplate {
+	if iso == nil {
+		panic("nil Isolate argument not supported")
+	}
+	if slowCallback == nil {
+		panic("nil FunctionCallback argument not supported")
+	}
+	if fast.FastFn == nil {
+		panic("nil FastFn in descriptor not supported")
+	}
+
+	cbref := iso.registerCallback(slowCallback)
+
+	argTypes := make([]C.CTypeInfoType, len(fast.ArgTypes))
+	for i, t := range fast.ArgTypes {
+		argTypes[i] = C.CTypeInfoType(t)
+	}
+	var argPtr *C.CTypeInfoType
+	if len(argTypes) > 0 {
+		argPtr = &argTypes[0]
+	}
+	fnInfo := C.BuildCFunctionInfo(
+		C.CTypeInfoType(fast.ReturnType),
+		argPtr,
+		C.int(len(argTypes)),
+	)
+
+	tmpl := &template{
+		ptr: C.NewFastFunctionTemplate(iso.ptr, C.int(cbref), fast.FastFn, fnInfo),
 		iso: iso,
 	}
 	runtime.SetFinalizer(tmpl, (*template).finalizer)

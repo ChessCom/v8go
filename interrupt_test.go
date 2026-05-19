@@ -65,3 +65,31 @@ func TestSetIdle_Toggle(t *testing.T) {
 		}
 	}
 }
+
+func TestRunIdleTasks(t *testing.T) {
+	iso := v8.NewIsolate()
+	defer iso.Dispose()
+
+	ctx := v8.NewContext(iso)
+	defer ctx.Close()
+
+	// Allocate garbage to create idle GC work.
+	for i := 0; i < 100; i++ {
+		ctx.RunScript("new Array(1000).fill('x')", "alloc.js")
+	}
+
+	// Give V8 a 10 ms idle window to run pending idle tasks
+	// (incremental sweeping, code aging, etc.).
+	iso.SetIdle(true)
+	iso.RunIdleTasks(0.010)
+	iso.SetIdle(false)
+
+	// Isolate should still be functional after idle work.
+	val, err := ctx.RunScript("1 + 1", "after-idle.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val.Int32() != 2 {
+		t.Fatalf("expected 2, got %d", val.Int32())
+	}
+}

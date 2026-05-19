@@ -95,8 +95,3 @@ jobs:
           draft: false
           prerelease: false
 
-  bump-downstreams:
-    name: bump downstreams
-    needs: [validate, release]
-    uses: ./.github/workflows/auto-bump-downstreams.yml
-    secrets: inherit

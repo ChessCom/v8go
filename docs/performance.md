@@ -255,10 +255,46 @@ For long-lived isolates (one isolate, many requests):
 3. Use `MemoryPressureNotification(Critical)` or `LowMemoryNotification`
    to trigger aggressive GC when the host is under memory pressure.
 4. Use `CancelTerminateExecution` before recycling a terminated isolate.
-5. Use `SetIdle(true)` when no requests are being processed so V8 can
-   do incremental GC work.
+5. Use `SetIdle(true)` + `RunIdleTasks(0.005)` when no requests are
+   being processed — this drives V8's incremental GC sweeper, code
+   deoptimization cleanup, and aging within a controlled time budget.
 6. Install `AddGCPrologueCallback`/`AddGCEpilogueCallback` to monitor
    GC pauses.
 7. Call `ContextDisposedNotification` after `ctx.Close()` to help V8
    finalize context-specific resources.
 8. Monitor `NumberOfDetachedContexts` for context leaks.
+
+## Zero-copy ArrayBuffer
+
+`NewArrayBufferExternal` creates an ArrayBuffer backed directly by a Go
+`[]byte` without copying. V8 reads and writes the Go memory in place.
+
+```go
+data := make([]byte, 64*1024)
+ab, _ := v8.NewArrayBufferExternal(ctx, data)
+// JS Uint8Array operations on `ab` read/write `data` directly.
+```
+
+The slice is pinned via `runtime.Pinner` and released automatically when
+V8 garbage-collects the ArrayBuffer or the isolate is disposed.
+
+## Fast API callbacks
+
+`NewFastFunctionTemplate` registers a V8 Fast API callback alongside
+the normal slow Go callback. When TurboFan optimizes a call site and
+can prove argument types match the descriptor, it calls the C function
+directly — bypassing CGo, argument marshaling, and the `m_value`
+allocation overhead entirely.
+
+```go
+tmpl := v8.NewFastFunctionTemplate(iso, slowCallback, v8.FastCallDescriptor{
+    FastFn:     unsafe.Pointer(C.MyFastFunction),
+    ReturnType: v8.CTypeInt32,
+    ArgTypes:   []v8.CType{v8.CTypeV8Value, v8.CTypeInt32, v8.CTypeInt32},
+})
+```
+
+Constraints:
+- The fast function must be C-linkage (not Go).
+- It must not allocate on the JS heap or trigger JS execution.
+- Register its address via `AddExternalReference` for snapshot compat.

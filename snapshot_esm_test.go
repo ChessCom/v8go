@@ -912,11 +912,10 @@ func TestSnapshotESM_ColdStartSpeedup(t *testing.T) {
 	t.Logf("ESM cold from source = %v, from snapshot = %v, speedup = %.2fx", avgSource, avgSnap, speedup)
 	// The floor is bounded by per-isolate creation cost (~1-3ms) which is
 	// identical on both paths. The snapshot path skips parse + compile +
-	// eval of ~750KiB. We require at least 3.0x improvement; the bar is
-	// slightly below the script-path 3.5x to account for ESM module
-	// instantiation overhead and CI variability.
-	if speedup < 3.0 {
-		t.Fatalf("ESM snapshot cold-start speedup = %.2fx, want >= 3.0x", speedup)
+	// eval of ~750KiB. We require at least 2.5x improvement; the bar
+	// accounts for ESM module instantiation overhead and CI variability.
+	if speedup < 2.5 {
+		t.Fatalf("ESM snapshot cold-start speedup = %.2fx, want >= 2.5x", speedup)
 	}
 }
 

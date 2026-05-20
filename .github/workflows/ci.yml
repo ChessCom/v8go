@@ -25,7 +25,9 @@ jobs:
 
       - name: install lld (Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install -y lld
+        run: |
+          sudo apt-get install -y lld
+          echo "CGO_LDFLAGS=-fuse-ld=lld" >> $GITHUB_ENV
 
       # --- lint (ubuntu only) ---
       - name: gofmt

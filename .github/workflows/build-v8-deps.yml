@@ -101,6 +101,10 @@ jobs:
           # use custom libcxx for all cross-compiles to avoid system header conflicts
           USE_SYSROOT="false"
           USE_CUSTOM_LIBCXX="false"
+          IS_CLANG="true"
+          if [[ "${{ matrix.target_os }}" == "linux" && "${{ matrix.target_arch }}" == "amd64" ]]; then
+            IS_CLANG="false"
+          fi
           if [[ "${{ matrix.target_os }}" == "linux" && "${{ matrix.target_arch }}" == "arm64" ]]; then
             USE_SYSROOT="true"
             USE_CUSTOM_LIBCXX="true"
@@ -111,13 +115,14 @@ jobs:
 
           cat > /tmp/gn_args.txt << EOF
           is_debug=false
-          is_clang=${{ matrix.target_os != 'linux' && 'true' || 'true' }}
+          is_clang=${IS_CLANG}
           target_os="${{ matrix.target_os == 'darwin' && 'mac' || matrix.target_os }}"
           target_cpu="${TARGET_CPU}"
           v8_target_cpu="${TARGET_CPU}"
           clang_use_chrome_plugins=false
           use_custom_libcxx=${USE_CUSTOM_LIBCXX}
           use_sysroot=${USE_SYSROOT}
+          use_thin_lto=false
           use_glib=false
           symbol_level=0
           strip_debug_info=true
@@ -168,7 +173,9 @@ jobs:
           import build
           build.args = Args()
           build.v8_path = os.path.join(os.getcwd(), 'v8')
-          build.is_clang = True
+          # Use system ar on Linux to produce GNU-format archives
+          # compatible with GNU ld (llvm-ar uses SysV64 format that ld rejects)
+          build.is_clang = ('${{ matrix.target_os }}' != 'linux')
 
           dest_path = os.path.join(os.getcwd(), '${{ matrix.target_os }}_${{ matrix.target_arch }}')
           os.makedirs(dest_path, exist_ok=True)

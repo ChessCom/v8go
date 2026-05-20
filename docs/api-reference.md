@@ -82,6 +82,15 @@ global.Set("version", "1.0.0")
 val, _ := ctx.RunScript("version", "v.js")
 ```
 
+### Retained value count
+
+Returns the number of C-side persistent handles tracked by a context.
+Useful for detecting value leaks.
+
+```go
+count := ctx.RetainedValueCount()
+```
+
 ### Microtask checkpoint
 
 ```go
@@ -100,6 +109,11 @@ go func() {
 }()
 val, err := ctx.RunScript(longRunningScript, "slow.js")
 // err will be an ExecutionTerminated error
+
+// Check termination state
+if iso.IsExecutionTerminating() {
+    iso.CancelTerminateExecution()
+}
 ```
 
 ### Heap statistics
@@ -210,7 +224,22 @@ val.Object()       // *Object (returns nil if not an object)
 ### Comparison
 
 ```go
-val1.SameValue(val2) // Object.is() semantics
+val1.SameValue(val2)    // Object.is() semantics
+val1.StrictEquals(val2) // === semantics
+```
+
+### Type introspection
+
+```go
+val.TypeOf() // "string", "number", "object", etc.
+```
+
+### JSON marshaling
+
+`Value` implements `json.Marshaler`:
+
+```go
+data, err := json.Marshal(val) // calls val.MarshalJSON()
 ```
 
 ### Release
@@ -294,6 +323,14 @@ val, err := obj.MethodCall("indexOf", searchVal)
 val, _ := ctx.Global().Get("myFunc")
 fn, _ := val.AsFunction()
 result, err := fn.Call(ctx.Global(), arg1, arg2)
+```
+
+### Constructing objects from functions
+
+```go
+val, _ := ctx.Global().Get("MyClass")
+fn, _ := val.AsFunction()
+obj, err := fn.NewInstance(arg1, arg2) // equivalent to `new MyClass(arg1, arg2)`
 ```
 
 ### Creating functions from Go
@@ -1186,30 +1223,33 @@ copy(backing, myData)
 
 ### NewArrayBufferExternal
 
-Creates an ArrayBuffer backed directly by a Go byte slice. When the V8
-sandbox is disabled, this is true zero-copy — JS and Go share the same
-memory. When `V8_ENABLE_SANDBOX` is active (current prebuilt deps), it
-falls back to alloc + copy internally. The slice is pinned via
+Creates an ArrayBuffer backed directly by a Go byte slice with true
+zero-copy — JS and Go share the same memory. The slice is pinned via
 `runtime.Pinner` and released when V8 GCs the ArrayBuffer.
 
 ```go
 data := make([]byte, 64*1024)
 ab, _ := v8.NewArrayBufferExternal(ctx, data)
-// With sandbox disabled: JS reads/writes `data` directly.
-// With sandbox enabled: V8 copies data in; subsequent mutations
-// to the Go slice are NOT visible in JS.
+// JS reads/writes `data` directly (zero-copy).
 ```
+
+The fork's prebuilt deps are compiled with `v8_enable_sandbox=false`,
+so `NewArrayBufferExternal` always uses the zero-copy path. If a
+custom V8 build has the sandbox enabled, the function falls back to
+alloc + `memcpy` internally.
 
 ### SandboxEnabled
 
 Reports whether the V8 binary was compiled with `V8_ENABLE_SANDBOX`.
-Use this to decide between zero-copy and copy-in strategies at runtime.
+The fork's prebuilt deps have the sandbox disabled, so this returns
+`false`. Useful for downstream consumers that may build against
+different V8 binaries.
 
 ```go
 if v8.SandboxEnabled() {
     // External ArrayBuffer will copy; use NewArrayBufferAlloc + write instead
 } else {
-    // True zero-copy via NewArrayBufferExternal
+    // True zero-copy via NewArrayBufferExternal (default for fork deps)
 }
 ```
 

@@ -65,16 +65,13 @@ Pushing the tag triggers the
 2. **Runs the full CI suite** (build, test, coverage on ubuntu + macOS).
 3. **Creates a GitHub Release** with release notes extracted from the
    matching `CHANGELOG.md` section.
-4. **Triggers downstream bumps** via
-   [auto-bump-downstreams](../.github/workflows/auto-bump-downstreams.yml),
-   opening PRs in blindfox and er (when they import
-   `github.com/ChessCom/v8go`).
 
 ### 4. Verify
 
 - Check the [Releases page](https://github.com/ChessCom/v8go/releases)
   for the new release.
-- Check downstream repos for auto-opened bump PRs.
+- Notify downstream consumers (blindfox, er) to update their
+  `go.mod` to the new tag.
 
 ## Consumer integration
 
@@ -129,23 +126,22 @@ When upstream `tommie/v8go` releases a new version (e.g. `v0.35.0`):
 
 ## Workflow details
 
-### release.yml
+### Workflows
 
-Triggered on tags matching `v*`. Jobs:
+| Workflow | Trigger | What it does |
+|---|---|---|
+| [`release.yml`](../.github/workflows/release.yml) | Tags matching `v*` | Validates tag format, runs CI, creates GitHub Release |
+| [`ci.yml`](../.github/workflows/ci.yml) | Push/PR to `main` | Lint, build, test, coverage, downstream compat |
+| [`upstream-sync.yml`](../.github/workflows/upstream-sync.yml) | Weekly (Mon 06:00 UTC) | Fetches upstream, opens merge PR |
+| [`build-v8-deps.yml`](../.github/workflows/build-v8-deps.yml) | Manual dispatch | Rebuilds V8 monolith for all platforms (not part of release flow) |
+
+### release.yml jobs
 
 | Job | What it does |
 |---|---|
 | `validate` | Checks tag format against `v[0-9]+.[0-9]+.[0-9]+-chess.[0-9]+` |
 | `ci` | Builds and tests on ubuntu-latest + macos-latest, enforces coverage |
 | `release` | Extracts CHANGELOG section, creates GitHub Release |
-| `bump-downstreams` | Calls `auto-bump-downstreams.yml` to open PRs in blindfox/er |
-
-### Required secrets
-
-| Secret | Used by | Scope |
-|---|---|---|
-| `CROSS_REPO_WRITE_TOKEN` | `bump-downstreams` job | `repo:write` on ChessCom/blindfox and ChessCom/er |
 
 The `GITHUB_TOKEN` (automatic) is sufficient for creating the GitHub
-Release. The downstream bump job skips gracefully when
-`CROSS_REPO_WRITE_TOKEN` is not set.
+Release.

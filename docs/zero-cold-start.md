@@ -14,6 +14,11 @@ hardware a ~750 KiB synthetic bundle goes from ~15 ms (source eval) to
 supported — `PackBundleESM` evaluates modules inside the SnapshotCreator,
 bridges the module namespace to a global, and serialises the heap.
 
+The fork's V8 deps are now compiled with `v8_enable_sandbox=false`,
+which removes the sandbox memory cage and enables true zero-copy
+`NewArrayBufferExternal`. This eliminates one barrier from the
+zero-copy data transfer path described below.
+
 The breakdown of that 4 ms is roughly:
 
 | Phase | Cost |

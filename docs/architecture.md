@@ -95,13 +95,15 @@ consists of:
 | File | Role |
 |---|---|
 | `v8go.h` / `v8go.cc` | Core exports: `Init`, `Version`, `SetFlags`, `NewIsolate`, `RunScript` |
-| `isolate.h` / `isolate.cc` | Isolate lifecycle, heap stats, script compilation |
+| `isolate.h` / `isolate.cc` | Isolate lifecycle, heap stats, script compilation, idle tasks |
 | `context.h` / `context.cc` | Context creation/disposal, `RunScript`, global object |
 | `value.h` / `value.cc` | Value type checks, conversions, constructors |
-| `object.h` / `object.cc` | Object property get/set/has/delete |
-| `function_template.h` / `function_template.cc` | FunctionTemplate creation, callback wiring |
+| `object.h` / `object.cc` | Object property get/set/has/delete, enumeration, prototype |
+| `function_template.h` / `function_template.cc` | FunctionTemplate creation, callback wiring, Fast API |
 | `object_template.h` / `object_template.cc` | ObjectTemplate creation, property configuration |
 | `snapshot.h` / `snapshot.cc` | **Fork-specific.** SnapshotCreator lifecycle, blob serialisation |
+| `arraybuffer.h` / `arraybuffer.cc` | **Fork-specific.** ArrayBuffer creation (copy, alloc, external zero-copy) |
+| `fast_api.h` / `fast_api.cc` | **Fork-specific.** V8 Fast API CFunctionInfo builder |
 | `symbol.h` / `symbol.cc` | Well-known symbol accessors |
 | `inspector.h` / `inspector.cc` | V8 Inspector protocol bridge |
 | `errors.h` / `errors.cc` | Error/exception construction |
@@ -426,16 +428,13 @@ enqueuing.
 caller can then write directly into the backing store via
 `ArrayBufferGetData`.
 
-`NewArrayBufferExternal` attempts true zero-copy: it wraps Go-owned
+`NewArrayBufferExternal` provides true zero-copy: it wraps Go-owned
 memory as an external `BackingStore` via `runtime.Pinner`, so JS and
-Go share the same bytes. However, when `V8_ENABLE_SANDBOX` is active
-(the case with current prebuilt deps), V8 requires all backing stores
-to reside inside its sandbox address space. In this mode, the C++
-implementation (`arraybuffer.cc`) falls back to alloc + `memcpy` and
-immediately releases the Go-side pin. The runtime function
-`SandboxEnabled()` reports which mode is active. Once V8 deps are
-rebuilt with `v8_enable_sandbox=false` (configured in `deps/build.py`),
-the zero-copy path activates automatically.
+Go share the same bytes. The fork's prebuilt V8 deps are compiled
+with `v8_enable_sandbox=false`, enabling the zero-copy path. The C++
+implementation (`arraybuffer.cc`) includes a fallback to alloc +
+`memcpy` for custom V8 builds with the sandbox enabled; the runtime
+function `SandboxEnabled()` reports which mode is active.
 
 `NewExternalOneByteString` wraps a C++ `ExternalOneByteStringResource`
 subclass that points at Go-owned memory. V8 reads directly from the Go
@@ -503,3 +502,64 @@ Module pointers are managed separately from Values because
 `StringOutputStream` adapter, copies the result to a `malloc`'d buffer,
 and deletes the V8-side snapshot. The Go side copies the buffer into a
 Go byte slice and frees the C buffer.
+
+## V8 build pipeline
+
+The fork maintains its own V8 static libraries (with
+`v8_enable_sandbox=false`) rather than consuming upstream's prebuilt
+deps. The build pipeline produces split archives for 4 platforms.
+
+```mermaid
+graph LR
+    subgraph source ["Source"]
+        Hash["deps/v8_hash"]
+        Fetch["gclient sync"]
+    end
+
+    subgraph build ["Build (per platform)"]
+        GN["gn gen"]
+        Ninja["ninja v8_monolith"]
+        Split["split_ar"]
+    end
+
+    subgraph output ["Output"]
+        Archives["libv8-0.a, libv8-1.a, ..."]
+        CGo["update_cgo.py"]
+        GoMod["go.mod replace"]
+    end
+
+    Hash --> Fetch
+    Fetch --> GN
+    GN --> Ninja
+    Ninja --> Split
+    Split --> Archives
+    Archives --> CGo
+    CGo --> GoMod
+```
+
+### Platform decision tree
+
+Each platform requires specific build flags to produce archives
+that are compatible with the target's system linker:
+
+| Platform | `is_clang` | `use_sysroot` | `use_custom_libcxx` | Reason |
+|----------|-----------|---------------|---------------------|--------|
+| linux/amd64 | `false` (gcc) | `false` | `false` | GNU `ld` cannot parse clang's ELF objects |
+| linux/arm64 | `true` | `true` | `true` | Cross-compile from x86\_64; system headers lack C++20 |
+| darwin/arm64 | `true` | `false` | `false` | Native build |
+| darwin/amd64 | `true` | `false` | `true` | Cross-compile from arm64; system headers vary |
+
+### Sandbox-disabled implications
+
+With `v8_enable_sandbox=false`:
+
+- `v8::ArrayBuffer::NewBackingStore` accepts external (Go-owned)
+  memory pointers, enabling true zero-copy `NewArrayBufferExternal`.
+- The `V8_ENABLE_SANDBOX` preprocessor define is absent from `cgo.go`,
+  so C++ code compiled by CGo takes the non-sandbox code paths.
+- `SandboxEnabled()` returns `false` at runtime.
+- V8's virtual memory cage is not allocated, slightly reducing the
+  process address space footprint.
+
+See [docs/maintaining.md](maintaining.md) for full rebuild
+instructions via CI or locally.

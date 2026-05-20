@@ -278,13 +278,10 @@ ab, _ := v8.NewArrayBufferExternal(ctx, data)
 The slice is pinned via `runtime.Pinner` and released automatically when
 V8 garbage-collects the ArrayBuffer or the isolate is disposed.
 
-**Sandbox caveat:** When `V8_ENABLE_SANDBOX` is active (the case with
-current prebuilt deps), V8 requires backing stores to live inside its
-sandbox address space. In this mode, `NewArrayBufferExternal` falls back
-to alloc + `memcpy` — the data is copied in and the Go-side pin is
-released immediately. Use `v8.SandboxEnabled()` to check at runtime.
-Once deps are rebuilt with `v8_enable_sandbox=false`, the zero-copy path
-activates automatically.
+The fork's V8 deps are compiled with `v8_enable_sandbox=false`, so the
+zero-copy path is always active. `v8.SandboxEnabled()` returns `false`
+to confirm. Custom V8 builds with the sandbox enabled will fall back to
+alloc + `memcpy` internally.
 
 ## Fast API callbacks
 

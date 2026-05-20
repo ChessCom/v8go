@@ -276,13 +276,16 @@ The ChessCom fork adds:
   caller-controlled time budget.
 * **Zero-copy ArrayBuffer** -- `NewArrayBufferExternal(ctx, []byte)`
   wraps Go memory as an ArrayBuffer via external BackingStore +
-  `runtime.Pinner`. Falls back to copy when V8 sandbox is active;
+  `runtime.Pinner`. True zero-copy with fork deps (sandbox disabled);
   `SandboxEnabled()` reports the mode at runtime.
 * **V8 Fast API callbacks** -- `NewFastFunctionTemplate` registers a
   C-linkage fast path that TurboFan calls directly, bypassing CGo and
   argument marshaling on hot call sites.
 * **GC lifecycle callbacks** -- `AddGCPrologueCallback` and
   `AddGCEpilogueCallback` for observing GC cycles with typed events.
+* **Sandbox-disabled V8 deps** -- fork-maintained V8 static libraries
+  compiled with `v8_enable_sandbox=false` for all 4 platforms, with
+  CI rebuild workflow and local build tooling (`make v8-deps-all`).
 
 ## Versioning
 
@@ -292,9 +295,25 @@ the changes above).
 
 ## V8 dependency
 
-See `deps/v8/` for the version of V8 currently in use. Prebuilt static
-libraries of V8 are included for Linux and macOS so you should not need
+The fork maintains its own V8 static libraries under `deps/{os}_{arch}/`
+compiled with `v8_enable_sandbox=false` to enable zero-copy ArrayBuffer.
+Prebuilt archives are included for all platforms so you should not need
 to build V8 yourself.
+
+### Rebuilding V8 deps
+
+To rebuild V8 from source (e.g. after updating `deps/v8_hash`):
+
+```bash
+# Via GitHub Actions (recommended)
+gh workflow run build-v8-deps.yml
+
+# Or locally on macOS (all 4 platforms)
+make v8-deps-all
+```
+
+See [docs/maintaining.md](docs/maintaining.md) for full details on the
+build pipeline, platform-specific flags, and linker compatibility.
 
 ## Documentation
 

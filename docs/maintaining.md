@@ -40,6 +40,13 @@ The fork-specific C++ files are the most common source of conflicts:
 | `fast_api_test_helpers.cc` | _does not exist upstream_ | Test-only C++ fast function for Fast API tests |
 | `fast_api_test_export.go` | _does not exist upstream_ | CGo bridge to test fast function address |
 | `isolate_registry.go` | _does not exist upstream_ | Global Go-side isolate registry for CGO callback dispatch |
+| `deps/*/cgo.go` | _does not exist upstream_ | Platform-specific CGo linker directives for local V8 archives |
+| `deps/*/go.mod` | _does not exist upstream_ | Go module definition for each platform dep |
+| `deps/*/vendor.go` | _does not exist upstream_ | Empty Go file to make platform dep a valid package |
+| `.gitattributes` | _does not exist upstream_ | Marks `*.a` as binary to prevent git line-ending corruption |
+| `Makefile` | _does not exist upstream_ | Convenience targets for local V8 builds |
+| `deps/Dockerfile.builder` | _does not exist upstream_ | Docker image for local Linux V8 builds |
+| `deps/build-all-local.sh` | _does not exist upstream_ | Orchestration script for local V8 builds |
 
 When conflicts appear, resolve them locally, ensure the CI matrix
 passes on both ubuntu-latest and macos-latest, and push to the sync
@@ -58,7 +65,75 @@ not yet mirrored in the deps modules. In that case, close the
 automated PR with a comment explaining the skip and reopen manually
 once the deps are updated.
 
-## Local V8 rebuild (escape hatch)
+## V8 rebuild via GitHub Actions
+
+The [`build-v8-deps.yml`](../.github/workflows/build-v8-deps.yml)
+workflow rebuilds V8 monolith from source for all 4 platforms. It is
+triggered manually via `workflow_dispatch` and optionally opens a PR
+with the rebuilt archives.
+
+### Matrix
+
+| Platform | Runner | Compiler | Cross-compile? | Special flags |
+|----------|--------|----------|----------------|---------------|
+| linux/amd64 | `ubuntu-latest` | gcc (`is_clang=false`) | No | -- |
+| linux/arm64 | `ubuntu-latest` | V8 clang | Yes (x86\_64 host) | `use_sysroot=true`, `use_custom_libcxx=true` |
+| darwin/arm64 | `macos-latest` | V8 clang | No | -- |
+| darwin/amd64 | `macos-latest` | V8 clang | Yes (arm64 host) | `use_custom_libcxx=true` |
+
+Build time is ~60-90 minutes per platform.
+
+### Key GN args
+
+All platforms share these V8 build flags:
+
+- `v8_enable_sandbox=false` -- enables true zero-copy ArrayBuffer
+- `v8_monolithic=true` -- single static library
+- `use_thin_lto=false` -- avoids LLVM bitcode in archives
+- `v8_embedder_string="-v8go"` -- identifies fork builds
+
+### Why linux/amd64 uses gcc
+
+V8's bundled clang produces ELF objects with features (section types,
+relocation formats) that GNU `ld` on Ubuntu cannot parse, resulting in
+`unknown architecture of input file` errors. Building with the system
+gcc produces standard GNU-compatible ELF objects.
+
+### Why cross-compiles need `use_custom_libcxx`
+
+When cross-compiling, the host system's C++ standard library headers
+may lack C++20/23 features that V8 requires (e.g. `std::bit_cast`,
+`std::make_unique_for_overwrite`). Using V8's bundled libc++ avoids
+these compatibility issues.
+
+### Archive splitting
+
+GitHub limits individual files to ~100 MB. The `split_ar` step in
+`deps/build.py` splits `libv8_monolith.a` (~100-140 MB) into chunks
+under 40 MB each (`libv8-0.a`, `libv8-1.a`, etc.). A `libmanifest`
+file lists the split archives for `update_cgo.py`.
+
+On Linux, the split step forces use of the system `ar` (GNU ar)
+instead of `llvm-ar` because GNU `ld` cannot reliably link archives
+with LLVM's SysV64 symbol table format.
+
+### Assemble job
+
+After all 4 platform builds succeed, the `assemble` job:
+
+1. Downloads all platform artifacts
+2. Runs `deps/update_cgo.py` to regenerate CGo files
+3. Updates `go.mod` with local `replace` directives
+4. Strips `-DV8_ENABLE_SANDBOX` from `cgo.go`
+5. Opens a PR on the `rebuild-v8-deps-no-sandbox` branch
+
+### Workflow inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| `create_pr` | boolean | `true` | Open a PR with rebuilt deps |
+
+## V8 rebuild locally (escape hatch)
 
 When CI is unavailable, too slow, or you need to iterate on V8 build
 flags locally, use the local build system. It builds V8 monolith for
@@ -82,13 +157,13 @@ make v8-deps-darwin-arm64
 make v8-deps-linux-amd64
 ```
 
+### How it works
+
 The orchestration script (`deps/build-all-local.sh`) handles:
 1. Fetching `depot_tools` and V8 source (first run only, cached after)
 2. Building darwin targets natively (cross-compile for amd64)
-3. Building linux targets in Docker containers (arm64 native, amd64 via Rosetta)
+3. Building linux targets in Docker containers
 4. Regenerating `cgo_*.go` files via `update_cgo.py`
-
-### How it works
 
 | Target | Method |
 |--------|--------|
@@ -125,18 +200,46 @@ go test -count=1 -timeout 5m ./...
 |------|---------|
 | `deps/build-all-local.sh` | Orchestration script |
 | `deps/build.py` | Per-platform V8 build (gclient, gn, ninja) |
-| `deps/Dockerfile.builder` | Docker image for linux builds |
+| `deps/Dockerfile.builder` | Docker image for linux builds (Ubuntu 24.04) |
 | `deps/update_cgo.py` | Regenerates cgo Go files from libmanifest |
 | `Makefile` | Convenience targets (`v8-deps-*`) |
 
+## Platform-specific linker notes
+
+### Linux
+
+The fork's V8 archives link with Go's CGo toolchain, which invokes
+the system `gcc`/`g++` and ultimately GNU `ld`. Several compatibility
+constraints apply:
+
+- **gcc for linux/amd64:** V8's clang produces ELF objects with
+  features GNU `ld` cannot parse. The linux/amd64 build uses gcc
+  (`is_clang=false`) to produce standard GNU ELF objects.
+- **`--start-group` / `--end-group`:** gcc-built V8 archives have
+  cross-archive symbol dependencies that require group linking. The
+  `cgo.go` for linux platforms wraps archives with
+  `-Wl,--start-group ... -Wl,--end-group`.
+- **`use_thin_lto=false`:** ThinLTO produces LLVM bitcode objects
+  that GNU `ld` cannot link. Disabled for all platforms.
+- **System `ar` for archive splitting:** On Linux, the `split_ar`
+  step uses GNU `ar` instead of `llvm-ar` to produce archives with
+  standard symbol tables that GNU `ld` can read.
+- **System libraries:** `-ldl -lm -lstdc++`
+
+### Darwin
+
+- No linker group needed (ld64 handles cross-archive references).
+- System libraries: `-lc++ -framework CoreFoundation`
+- V8's bundled clang is used for all darwin builds.
+
 ## V8 binary upgrades
 
-The prebuilt `libv8.a` static libraries live in the deps submodules
-(`tommie/v8go/deps/linux_x86_64`, `tommie/v8go/deps/darwin_arm64`,
-etc.). When upstream bumps the V8 version:
+The fork maintains its own V8 static libraries under `deps/{os}_{arch}/`
+with `v8_enable_sandbox=false`. When upgrading the V8 version:
 
-1. The deps modules are republished with new binaries.
-2. `go.sum` picks up the new hashes on `go mod tidy`.
+1. Update `deps/v8_hash` with the new V8 commit hash.
+2. Run the `build-v8-deps` workflow (or `make v8-deps-all` locally)
+   to rebuild all 4 platforms.
 3. Every CGO call site must be re-validated: the V8 C++ API is not
    ABI-stable across versions, and header renames or signature changes
    can break compilation.

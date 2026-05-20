@@ -37,12 +37,25 @@ V8 Fast API callbacks, idle-task GC scheduling, and CI consolidation.
 
 ### Changed
 
-* **Sandbox status** (`cgo.go`, `deps/build.py`):
-  `V8_ENABLE_SANDBOX` remains active in `cgo.go` to match the prebuilt
-  static libraries. `deps/build.py` sets `v8_enable_sandbox=false` for
-  local rebuilds — once deps are rebuilt without the sandbox, the
-  `NewArrayBufferExternal` zero-copy path activates automatically.
-  `SandboxEnabled()` reports the compile-time state at runtime.
+* **V8 sandbox disabled** (`cgo.go`, `deps/build.py`, `deps/*/`):
+  Rebuilt V8 monolith for all 4 platforms with
+  `v8_enable_sandbox=false`. Removed `-DV8_ENABLE_SANDBOX` from
+  `cgo.go`. `SandboxEnabled()` now returns `false` and
+  `NewArrayBufferExternal` uses true zero-copy (no memcpy fallback).
+
+* **Fork-maintained V8 deps** (`deps/{os}_{arch}/`):
+  Replaced upstream `tommie/v8go/deps/*` submodules with local
+  platform directories containing split archives, `cgo.go`, `go.mod`,
+  and `vendor.go`. `go.mod` uses `replace` directives to point to
+  these local deps.
+
+* **V8 build infrastructure** (`.github/workflows/build-v8-deps.yml`,
+  `deps/build-all-local.sh`, `Makefile`, `deps/Dockerfile.builder`):
+  Added CI workflow for rebuilding V8 from source via
+  `workflow_dispatch`, plus local build tooling (`make v8-deps-all`)
+  with Docker for Linux targets. linux/amd64 uses gcc
+  (`is_clang=false`) for GNU `ld` compatibility; cross-compile targets
+  use V8's clang with `use_custom_libcxx=true`.
 
 * **CI consolidated** (`.github/workflows/ci.yml`):
   Collapsed from 10 jobs to 2 (one per OS). Each job runs lint, build,

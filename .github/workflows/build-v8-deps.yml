@@ -101,6 +101,10 @@ jobs:
           # use custom libcxx for all cross-compiles to avoid system header conflicts
           USE_SYSROOT="false"
           USE_CUSTOM_LIBCXX="false"
+          IS_CLANG="true"
+          if [[ "${{ matrix.target_os }}" == "linux" && "${{ matrix.target_arch }}" == "amd64" ]]; then
+            IS_CLANG="false"
+          fi
           if [[ "${{ matrix.target_os }}" == "linux" && "${{ matrix.target_arch }}" == "arm64" ]]; then
             USE_SYSROOT="true"
             USE_CUSTOM_LIBCXX="true"
@@ -111,7 +115,7 @@ jobs:
 
           cat > /tmp/gn_args.txt << EOF
           is_debug=false
-          is_clang=${{ matrix.target_os != 'linux' && 'true' || 'true' }}
+          is_clang=${IS_CLANG}
           target_os="${{ matrix.target_os == 'darwin' && 'mac' || matrix.target_os }}"
           target_cpu="${TARGET_CPU}"
           v8_target_cpu="${TARGET_CPU}"

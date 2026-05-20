@@ -169,7 +169,9 @@ jobs:
           import build
           build.args = Args()
           build.v8_path = os.path.join(os.getcwd(), 'v8')
-          build.is_clang = True
+          # Use system ar on Linux to produce GNU-format archives
+          # compatible with GNU ld (llvm-ar uses SysV64 format that ld rejects)
+          build.is_clang = ('${{ matrix.target_os }}' != 'linux')
 
           dest_path = os.path.join(os.getcwd(), '${{ matrix.target_os }}_${{ matrix.target_arch }}')
           os.makedirs(dest_path, exist_ok=True)

@@ -19,13 +19,15 @@
   Local<Context> local_ctx;                \
   if (ctx != nullptr) {                    \
     local_ctx = ctx->ptr.Get(iso);         \
-  } else {                                 \
+  }                                        \
+  if (local_ctx.IsEmpty() && ctx == nullptr) { \
     ctx = isolateInternalContext(iso);      \
     if (ctx != nullptr) {                  \
       local_ctx = ctx->ptr.Get(iso);       \
-    } else {                               \
-      local_ctx = iso->GetCurrentContext(); \
     }                                      \
+  }                                        \
+  if (local_ctx.IsEmpty()) {               \
+    local_ctx = iso->GetCurrentContext();   \
   }                                        \
   Context::Scope context_scope(local_ctx); \
   Local<Value> value = val->ptr.Get(iso);

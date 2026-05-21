@@ -255,22 +255,50 @@ RtnString ValueToDetailString(ValuePtr ptr) {
   return StringToRtnString(iso, str);
 }
 
+static RtnString valueToStringFallback() {
+  RtnString rtn = {0};
+  static const char fallback[] = "(null value)";
+  char* data = static_cast<char*>(malloc(sizeof(fallback) - 1));
+  memcpy(data, fallback, sizeof(fallback) - 1);
+  rtn.data = data;
+  rtn.length = sizeof(fallback) - 1;
+  return rtn;
+}
+
 RtnString ValueToString(ValuePtr ptr) {
   if (ptr == nullptr || ptr->iso == nullptr) {
-    RtnString rtn = {0};
-    static const char fallback[] = "(null value)";
-    char* data = static_cast<char*>(malloc(sizeof(fallback) - 1));
-    memcpy(data, fallback, sizeof(fallback) - 1);
-    rtn.data = data;
-    rtn.length = sizeof(fallback) - 1;
-    return rtn;
+    return valueToStringFallback();
   }
-  LOCAL_VALUE(ptr);
+
+  Isolate* iso = ptr->iso;
+  Locker locker(iso);
+  Isolate::Scope isolate_scope(iso);
+  HandleScope handle_scope(iso);
+
+  Local<Context> local_ctx;
+  if (ptr->ctx != nullptr) {
+    local_ctx = ptr->ctx->ptr.Get(iso);
+  }
+  if (local_ctx.IsEmpty()) {
+    local_ctx = iso->GetCurrentContext();
+  }
+  if (local_ctx.IsEmpty()) {
+    m_ctx* ictx = isolateInternalContext(iso);
+    if (ictx != nullptr) {
+      local_ctx = ictx->ptr.Get(iso);
+    }
+  }
+  if (local_ctx.IsEmpty()) {
+    return valueToStringFallback();
+  }
+
+  Context::Scope context_scope(local_ctx);
+  Local<Value> value = ptr->ptr.Get(iso);
+  if (value.IsEmpty()) {
+    return valueToStringFallback();
+  }
+
   RtnString rtn = {0};
-  // String::Utf8Value will result in an empty string if conversion to a string
-  // fails
-  // TODO: Consider propagating the JS error. A fallback value could be returned
-  // in Value.String()
   String::Utf8Value src(iso, value);
   char* data = static_cast<char*>(malloc(src.length()));
   memcpy(data, *src, src.length());

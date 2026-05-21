@@ -22,6 +22,12 @@ static void goPromiseRejectTrampoline(PromiseRejectMessage message) {
   int event = static_cast<int>(message.GetEvent());
 
   m_ctx* ctx = static_cast<m_ctx*>(iso->GetData(0));
+  if (ctx == nullptr) {
+    goPromiseRejectCallback(
+        reinterpret_cast<uintptr_t>(iso), event,
+        nullptr, nullptr);
+    return;
+  }
 
   m_value* promise_val = new m_value;
   promise_val->id = 0;

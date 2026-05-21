@@ -256,6 +256,15 @@ RtnString ValueToDetailString(ValuePtr ptr) {
 }
 
 RtnString ValueToString(ValuePtr ptr) {
+  if (ptr == nullptr || ptr->iso == nullptr) {
+    RtnString rtn = {0};
+    static const char fallback[] = "(null value)";
+    char* data = static_cast<char*>(malloc(sizeof(fallback) - 1));
+    memcpy(data, fallback, sizeof(fallback) - 1);
+    rtn.data = data;
+    rtn.length = sizeof(fallback) - 1;
+    return rtn;
+  }
   LOCAL_VALUE(ptr);
   RtnString rtn = {0};
   // String::Utf8Value will result in an empty string if conversion to a string

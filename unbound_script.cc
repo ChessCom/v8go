@@ -12,6 +12,7 @@ using namespace v8;
 ScriptCompilerCachedData* UnboundScriptCreateCodeCache(
     Isolate* iso,
     UnboundScriptPtr us_ptr) {
+  if (!iso || !us_ptr) return nullptr;
   ISOLATE_SCOPE(iso);
 
   Local<UnboundScript> unbound_script = us_ptr->ptr.Get(iso);

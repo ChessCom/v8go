@@ -92,6 +92,12 @@ jobs:
           EOF
           gclient sync --delete_unversioned_trees --no-history
 
+      - name: install Rust cross-compilation target (darwin/amd64)
+        if: matrix.target_os == 'darwin' && matrix.target_arch == 'amd64'
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --target x86_64-apple-darwin
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
       - name: generate build args
         run: |
           mkdir -p deps/.build/${{ matrix.target_os }}_${{ matrix.target_arch }}
@@ -111,6 +117,12 @@ jobs:
           fi
           if [[ "${{ matrix.target_os }}" == "darwin" && "${{ matrix.target_arch }}" == "amd64" ]]; then
             USE_CUSTOM_LIBCXX="true"
+          fi
+
+          EXTRA_GN_ARGS=""
+          if [[ "${{ matrix.target_os }}" == "darwin" && "${{ matrix.target_arch }}" == "amd64" ]]; then
+            RUST_SYSROOT="$($HOME/.cargo/bin/rustc --print sysroot)"
+            EXTRA_GN_ARGS="rust_sysroot_absolute=\"${RUST_SYSROOT}\""
           fi
 
           cat > /tmp/gn_args.txt << EOF
@@ -138,6 +150,7 @@ jobs:
           v8_enable_sandbox=false
           exclude_unwind_tables=true
           v8_android_log_stdout=true
+          ${EXTRA_GN_ARGS}
           EOF
 
       - name: install sysroot (linux/arm64 cross-compile)

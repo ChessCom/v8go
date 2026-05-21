@@ -115,9 +115,9 @@ jobs:
             USE_SYSROOT="true"
             USE_CUSTOM_LIBCXX="true"
           fi
-          if [[ "${{ matrix.target_os }}" == "darwin" && "${{ matrix.target_arch }}" == "amd64" ]]; then
-            USE_CUSTOM_LIBCXX="true"
-          fi
+          # darwin/amd64: do NOT use custom libcxx. V8's custom libcxx uses
+          # std::__Cr:: namespace, but CGo links system -lc++ (std::__1::),
+          # causing ABI mismatch. macOS SDK supports cross-arch natively.
 
           EXTRA_GN_ARGS=""
           if [[ "${{ matrix.target_os }}" == "darwin" && "${{ matrix.target_arch }}" == "amd64" ]]; then

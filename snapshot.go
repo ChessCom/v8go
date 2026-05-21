@@ -86,14 +86,23 @@ var ErrSnapshotCreatorConsumed = errors.New(
 // lets the embedder use the wrapper freely from any goroutine.
 var snapshotCreatorMu sync.Mutex
 
-// snapshotDeserMu serialises every Isolate::New call. The V8 binaries we
-// ship via tommie/v8go/deps assert and abort when two isolates are being
+// snapshotDeserMu serialises Isolate::New and Isolate::Dispose against
+// each other AND against CreateCodeCache. The V8 binaries we ship via
+// tommie/v8go/deps assert and abort when two isolates are being
 // constructed in parallel because the shared-heap initialiser (string
 // table forwarding, read-only heap shrink, etc) is not thread-safe in
-// the absence of v8::Locker. Holding this mutex around every isolate
-// construction keeps the wrapper safe to call from any goroutine, with
-// no cost outside the construction critical section.
-var snapshotDeserMu sync.Mutex
+// the absence of v8::Locker.
+//
+// RWMutex semantics:
+//   - NewIsolate / Dispose take Lock (exclusive writer) because they
+//     mutate V8 process-global shared-heap state.
+//   - CreateCodeCache takes RLock (shared reader) because it reads
+//     shared-heap objects (ReadOnlySpace roots, StringTable) that
+//     Dispose can tear down concurrently.
+//
+// Multiple CreateCodeCache calls on different isolates remain parallel;
+// they only block while an isolate is being created or disposed.
+var snapshotDeserMu sync.RWMutex
 
 // NewSnapshotCreator returns a new SnapshotCreator wired to the frozen
 // process-wide external_references registry. The very first call to this

@@ -342,14 +342,18 @@ func (i *Isolate) Dispose() {
 	unregisterIsolate(i)
 	// Serialise dispose against snapshotDeserMu: V8 14.x corrupts its
 	// shared-heap teardown state if a parallel goroutine is constructing
-	// a new isolate at the same moment we are tearing one down. The
-	// critical section is short (microseconds) and idiomatic v8::Locker
-	// rules continue to apply for everyday API calls.
+	// a new isolate at the same moment we are tearing one down.
+	// CreateCodeCache takes an RLock on the same mutex so it cannot
+	// overlap with Dispose — see unbound_script.go.
+	//
+	// i.ptr is set to nil inside the lock so that any RLock holder
+	// that re-checks after acquiring the lock sees the nil and bails
+	// instead of passing a dangling pointer to CGo.
 	snapshotDeserMu.Lock()
 	C.IsolateDisposeSnapshot(i.ptr)
 	C.IsolateDispose(i.ptr)
-	snapshotDeserMu.Unlock()
 	i.ptr = nil
+	snapshotDeserMu.Unlock()
 	if i.snapshotData != nil {
 		C.free(i.snapshotData)
 		i.snapshotData = nil

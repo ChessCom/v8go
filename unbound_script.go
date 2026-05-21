@@ -22,9 +22,32 @@ func (u *UnboundScript) Run(ctx *Context) (*Value, error) {
 	return valueResult(ctx, rtn)
 }
 
-// Create a code cache from the unbound script.
+// CreateCodeCache serialises the compiled bytecode so it can be fed to
+// a future CompileUnboundScript call (on any isolate) to skip parsing.
+//
+// An RLock on snapshotDeserMu is held for the duration of the CGo call
+// so that Isolate.Dispose (which takes a write Lock) cannot tear down
+// V8 shared-heap state while CreateCodeCache is reading it. Multiple
+// concurrent CreateCodeCache calls on different isolates remain parallel.
+//
+// Returns nil without calling into V8 if the isolate has already been
+// disposed (ptr set to nil inside Dispose's write lock).
 func (u *UnboundScript) CreateCodeCache() *CompilerCachedData {
+	if u == nil || u.iso == nil {
+		return nil
+	}
+
+	snapshotDeserMu.RLock()
+	defer snapshotDeserMu.RUnlock()
+
+	if u.iso.ptr == nil {
+		return nil
+	}
+
 	rtn := C.UnboundScriptCreateCodeCache(u.iso.ptr, u.ptr)
+	if rtn == nil {
+		return nil
+	}
 
 	cachedData := &CompilerCachedData{
 		Bytes:    []byte(C.GoBytes(unsafe.Pointer(rtn.data), rtn.length)),

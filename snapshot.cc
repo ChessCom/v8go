@@ -263,6 +263,7 @@ IsolatePtr v8go_NewIsolateWithSnapshotAndRefs(
 
   m_ctx* ctx = new m_ctx;
   ctx->iso = iso;
+  ctx->ptr.Reset(iso, Context::New(iso));
   iso->SetData(0, ctx);
   iso->SetData(1, reinterpret_cast<void*>(blob));
 

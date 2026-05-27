@@ -71,6 +71,18 @@ extern void SnapshotCreatorDispose(SnapshotCreatorPtr p);
 // snapshot containing Go-backed FunctionTemplates can be restored.
 extern intptr_t v8go_FunctionTemplateCallback_addr(void);
 
+// SnapshotCreatorFreshContext creates a fresh Context::New in the
+// SnapshotCreator's isolate and copies the specified global properties
+// from old_ctx into the new context. The fresh context has a clean
+// global object Map (no lingering transitions from deleted properties),
+// which avoids V8 Genesis::InitializeGlobal collisions when the snapshot
+// is deserialized. The old context's tracked handles and values are
+// released internally. Returns the new m_ctx, or nullptr on failure.
+extern ContextPtr SnapshotCreatorFreshContext(SnapshotCreatorPtr p,
+                                              ContextPtr old_ctx,
+                                              const char** keep_names,
+                                              int keep_count);
+
 // v8go_NewIsolateWithSnapshotAndRefs is the snapshot-aware isolate factory
 // that wires in a 0-terminated external_references array.
 extern IsolatePtr v8go_NewIsolateWithSnapshotAndRefs(

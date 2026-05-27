@@ -1,5 +1,7 @@
 #include <cstdlib>
 #include <cstring>
+#include <utility>
+#include <vector>
 
 #include "deps/include/v8-context.h"
 #include "deps/include/v8-isolate.h"
@@ -219,6 +221,88 @@ void SnapshotCreatorDispose(SnapshotCreatorPtr p) {
   // hundred bytes than abort the host process. The Go wrapper makes
   // sure Dispose is called from a single goroutine.
   delete p;
+}
+
+ContextPtr SnapshotCreatorFreshContext(SnapshotCreatorPtr p,
+                                      ContextPtr old_ctx,
+                                      const char** keep_names,
+                                      int keep_count) {
+  if (p == nullptr || old_ctx == nullptr) {
+    return nullptr;
+  }
+  if (keep_count > 0 && keep_names == nullptr) {
+    return nullptr;
+  }
+
+  Isolate* iso = p->GetIsolate();
+  HandleScope handle_scope(iso);
+
+  Local<Context> old_local = old_ctx->ptr.Get(iso);
+  Local<Context> new_local = Context::New(iso);
+
+  Local<Object> old_global = old_local->Global();
+  Local<Object> new_global = new_local->Global();
+
+  // Read phase: enter the old context so V8 internal callbacks (accessors,
+  // interceptors) see the correct entered context during Get.
+  std::vector<std::pair<Local<String>, Local<Value>>> pairs;
+  {
+    Context::Scope old_scope(old_local);
+    for (int i = 0; i < keep_count; i++) {
+      Local<String> name;
+      if (!String::NewFromUtf8(iso, keep_names[i]).ToLocal(&name)) {
+        delete old_ctx;
+        return nullptr;
+      }
+      Local<Value> val;
+      if (old_global->Get(old_local, name).ToLocal(&val)) {
+        pairs.push_back({name, val});
+      }
+    }
+  }
+
+  // Write phase: enter the new context for Set.
+  {
+    Context::Scope new_scope(new_local);
+    for (auto& kv : pairs) {
+      if (!new_global->Set(new_local, kv.first, kv.second)
+               .FromMaybe(false)) {
+        delete old_ctx;
+        return nullptr;
+      }
+    }
+  }
+
+  // Reset all Global<> handles on the old context. The Persistent
+  // destructors fired by the subsequent deletes also call Reset(), but
+  // SnapshotCreatorReleaseEmbedderHandles additionally drains templates
+  // which are tracked on the isolate scaffold, not the embedder ctx.
+  SnapshotCreatorReleaseEmbedderHandles(iso, old_ctx);
+
+  for (auto& kv : old_ctx->vals) {
+    delete kv.second;
+  }
+  for (m_unboundScript* us : old_ctx->unboundScripts) {
+    delete us;
+  }
+  for (m_module* mod : old_ctx->modules) {
+    if (mod != nullptr) {
+      delete mod;
+    }
+  }
+  delete old_ctx;
+
+  m_ctx* ctx = new m_ctx;
+  ctx->ptr.Reset(iso, new_local);
+  ctx->iso = iso;
+  ctx->track_templates = true;
+  // Slot 0 is deliberately NOT updated here. It still holds the original
+  // scaffold m_ctx from NewSnapshotCreator, which tracks the isolate's
+  // null/undefined Global<> handles. CreateBlob drains slot 0 separately.
+  // The "must be called after all scripts" contract ensures no modules
+  // are compiled post-FreshContext, so module tracking on the scaffold
+  // ctx remains correct.
+  return ctx;
 }
 
 intptr_t v8go_FunctionTemplateCallback_addr(void) {

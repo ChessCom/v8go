@@ -243,6 +243,88 @@ func (sc *SnapshotCreator) CreateBlob(fch FunctionCodeHandling) ([]byte, error) 
 	return out, nil
 }
 
+// FreshContext replaces the SnapshotCreator's embedder context with a
+// freshly created one that has a clean global object Map. Only the
+// specified global property names are copied from the old context to
+// the new one. All other state (including values tracked by the old
+// context) is released.
+//
+// This resolves V8's Genesis::InitializeGlobal Map collision: when a
+// snapshot context accumulates hundreds of global property additions
+// (e.g. polyfill constructors), the Map transitions persist even after
+// the properties are deleted. Deserializing such a context via
+// Context::FromSnapshot triggers a fatal V8 assertion. FreshContext
+// creates a new context whose Map has no extra transitions, then
+// copies the specified properties (typically just "_bf") by reference
+// so the full object graph survives serialization.
+//
+// If WithDeterministicTime was set, the determinism shim is
+// automatically reinstalled on the fresh context.
+//
+// Access to any *Value obtained from the old context after FreshContext
+// is undefined behaviour and may panic or corrupt memory. Callers must
+// not retain references to values from the old context.
+//
+// Must be called after all scripts have executed and before CreateBlob.
+func (sc *SnapshotCreator) FreshContext(keep []string) error {
+	sc.closeMu.Lock()
+	defer sc.closeMu.Unlock()
+	if sc.created {
+		return ErrSnapshotCreatorConsumed
+	}
+	if sc.ctx == nil {
+		return errors.New("v8go: FreshContext called before Context()")
+	}
+
+	cNames := make([]*C.char, len(keep))
+	for i, name := range keep {
+		cNames[i] = C.CString(name)
+	}
+	defer func() {
+		for _, p := range cNames {
+			C.free(unsafe.Pointer(p))
+		}
+	}()
+
+	var namesPtr **C.char
+	if len(cNames) > 0 {
+		namesPtr = &cNames[0]
+	}
+
+	newCtx := C.SnapshotCreatorFreshContext(
+		sc.ptr, sc.ctx.ptr, namesPtr, C.int(len(keep)),
+	)
+	if newCtx == nil {
+		return errors.New("v8go: SnapshotCreatorFreshContext failed")
+	}
+
+	// The old context's m_ctx has been freed by the C++ side.
+	// Deregister the Go-side context reference.
+	sc.ctx.deregister()
+	sc.ctx.ptr = nil
+
+	// Wire up the new context.
+	ctxMutex.Lock()
+	ctxSeq++
+	ref := ctxSeq
+	ctxMutex.Unlock()
+
+	sc.ctx = &Context{
+		ref: ref,
+		ptr: newCtx,
+		iso: sc.iso,
+	}
+	sc.ctx.register()
+
+	if sc.cfg != nil && sc.cfg.deterministicTime {
+		if err := sc.installDeterminismShim(sc.ctx, sc.cfg.seedMillis); err != nil {
+			return fmt.Errorf("v8go: FreshContext: failed to reinstall determinism shim: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // Dispose releases the SnapshotCreator. Safe to call multiple times. If
 // CreateBlob was not invoked, the underlying isolate is disposed by the
 // SnapshotCreator destructor.

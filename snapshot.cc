@@ -221,6 +221,62 @@ void SnapshotCreatorDispose(SnapshotCreatorPtr p) {
   delete p;
 }
 
+ContextPtr SnapshotCreatorFreshContext(SnapshotCreatorPtr p,
+                                      ContextPtr old_ctx,
+                                      const char** keep_names,
+                                      int keep_count) {
+  if (p == nullptr || old_ctx == nullptr) {
+    return nullptr;
+  }
+
+  Isolate* iso = p->GetIsolate();
+  HandleScope handle_scope(iso);
+
+  Local<Context> old_local = old_ctx->ptr.Get(iso);
+  Local<Context> new_local = Context::New(iso);
+
+  // Copy specified properties from the old global to the new global.
+  // Both contexts share the same isolate heap, so the V8 values are
+  // the same heap objects — we're just creating new references from
+  // the clean global.
+  Context::Scope new_scope(new_local);
+  Local<Object> old_global = old_local->Global();
+  Local<Object> new_global = new_local->Global();
+
+  for (int i = 0; i < keep_count; i++) {
+    Local<String> name =
+        String::NewFromUtf8(iso, keep_names[i]).ToLocalChecked();
+    Local<Value> val;
+    if (old_global->Get(old_local, name).ToLocal(&val)) {
+      new_global->Set(new_local, name, val).Check();
+    }
+  }
+
+  // Release all Global<> handles from the old context so V8 doesn't
+  // abort with "global handle not serialized" during CreateBlob.
+  SnapshotCreatorReleaseEmbedderHandles(iso, old_ctx);
+
+  // Free the old context's tracked values.
+  for (auto& kv : old_ctx->vals) {
+    delete kv.second;
+  }
+  for (m_unboundScript* us : old_ctx->unboundScripts) {
+    delete us;
+  }
+  for (m_module* mod : old_ctx->modules) {
+    if (mod != nullptr) {
+      delete mod;
+    }
+  }
+  delete old_ctx;
+
+  m_ctx* ctx = new m_ctx;
+  ctx->ptr.Reset(iso, new_local);
+  ctx->iso = iso;
+  ctx->track_templates = true;
+  return ctx;
+}
+
 intptr_t v8go_FunctionTemplateCallback_addr(void) {
   return reinterpret_cast<intptr_t>(&FunctionTemplateCallback);
 }

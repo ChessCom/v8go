@@ -427,3 +427,83 @@ When merging an upstream sync PR:
 2. Strip them: remove the 3-line `// Copyright … // found in the LICENSE file.` block and the trailing blank line.
 3. If upstream re-adds a `LICENSE` file at the root, delete it.
 4. Do **not** touch files under `deps/` — those are upstream V8 headers and must stay intact.
+
+## Maintenance ceremonies
+
+These ceremonies are automated via GNS triggers (see
+[docs/gns.md](gns.md)) and can also be run manually. Each ceremony
+has a matching GNS trigger that executes on Sunday mornings.
+
+### Ceremony A: Weekly upstream sync review
+
+**Trigger:** `user.yuri.triggers.v8go-upstream-check` (cron, Sunday 09:00 UTC)
+
+The `upstream-sync.yml` workflow runs Monday 06:00 UTC and opens a
+merge PR when new upstream commits exist. This ceremony triages it.
+
+1. Check whether an open upstream sync PR exists (`gh pr list --label upstream-sync`).
+2. Verify CI passed on both ubuntu-latest and macos-latest.
+3. Inspect the diff for V8 header renames or API signature changes.
+4. If V8 headers changed, compile fork-only C++ files first:
+   ```bash
+   go build ./...
+   ```
+5. Strip re-introduced license headers (see "License headers" above).
+6. Merge if clean, or close with a comment explaining the skip reason.
+7. Log the outcome to `user.yuri.public.v8go.maintenance-log` via GNS.
+
+### Ceremony B: Weekly benchmark baseline
+
+**Trigger:** `user.yuri.triggers.v8go-benchmark` (cron, Sunday 08:00 UTC)
+
+1. Run cold-start benchmarks:
+   ```bash
+   go test -bench=BenchmarkColdStart -benchmem -count=5 -timeout 5m
+   ```
+2. Run speedup assertion tests:
+   ```bash
+   go test -run TestSnapshot_ColdStartSpeedup -v -count=1
+   go test -run TestSnapshotESM_ColdStartSpeedup -v -count=1
+   ```
+3. Read previous baseline from GNS:
+   ```bash
+   gns get user.yuri.public.v8go.benchmarks.latest
+   ```
+4. Compare ns/op, B/op, allocs/op against previous. Flag regressions
+   exceeding 10%.
+5. Store new baseline in GNS:
+   ```bash
+   gns set user.yuri.public.v8go.benchmarks.latest --stdin < results.json
+   ```
+6. Notify via Slack DM if any regression exceeds the threshold.
+
+### Ceremony C: Weekly V8 build sync check
+
+**Trigger:** runs as part of the upstream check (Ceremony A)
+
+1. Check `deps/v8_hash` against upstream for V8 version changes.
+2. If V8 version changed and `build-v8-deps.yml` has not been run:
+   - Flag for manual `build-v8-deps.yml` dispatch.
+   - Verify all 4 platform archives after build completes.
+3. Run full test suite + downstream compat checks.
+4. Cut a release if the V8 build produced new archives.
+
+### Ceremony D: Weekly documentation refresh
+
+**Trigger:** runs as part of the full maintenance trigger
+(`user.yuri.triggers.v8go-maintenance`, on-demand)
+
+1. Verify docs match current code:
+   - `docs/maintaining.md` — upstream sync, V8 rebuild, CGO surface
+   - `docs/release.md` — versioning scheme, workflow jobs
+   - `docs/architecture.md` — layer diagram, data slots, concurrency
+   - `docs/performance.md` — benchmark numbers, speedup thresholds
+2. Update GNS bootstrap if API surface changed:
+   ```bash
+   gns set user.yuri.public.v8go.bootstrap --stdin < bootstrap.md
+   ```
+3. Update GNS code-review if new audit checks are needed:
+   ```bash
+   gns set user.yuri.public.v8go.code-review --stdin < code-review.md
+   ```
+4. Verify `docs/performance.md` benchmarks match latest GNS baseline.

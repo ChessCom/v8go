@@ -1,6 +1,7 @@
 package v8go_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -202,4 +203,291 @@ func TestFreshContext_EmptyKeepList(t *testing.T) {
 	if v.String() != "undefined" {
 		t.Fatalf("typeof temp = %s, want undefined", v.String())
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial / error-path regression tests
+// ---------------------------------------------------------------------------
+
+// TestFreshContext_CalledTwice verifies that calling FreshContext twice in
+// sequence produces a valid snapshot (the second call replaces the context
+// created by the first call).
+func TestFreshContext_CalledTwice(t *testing.T) {
+	sc := v8.NewSnapshotCreator()
+	ctx := sc.Context()
+
+	if _, err := ctx.RunScript("globalThis.a = 1; globalThis.b = 2;", "setup.js"); err != nil {
+		sc.Dispose()
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := sc.FreshContext([]string{"a", "b"}); err != nil {
+		sc.Dispose()
+		t.Fatalf("first FreshContext: %v", err)
+	}
+
+	// Run a script on the first fresh context to set up state for the second.
+	freshCtx := sc.Context()
+	if _, err := freshCtx.RunScript("globalThis.c = 3;", "mid.js"); err != nil {
+		sc.Dispose()
+		t.Fatalf("mid script: %v", err)
+	}
+
+	if err := sc.FreshContext([]string{"a", "c"}); err != nil {
+		sc.Dispose()
+		t.Fatalf("second FreshContext: %v", err)
+	}
+
+	blob, err := sc.CreateBlob(v8.FunctionCodeKeep)
+	sc.Dispose()
+	if err != nil {
+		t.Fatalf("CreateBlob: %v", err)
+	}
+
+	iso := v8.NewIsolate(v8.WithSnapshotBlob(blob))
+	defer iso.Dispose()
+
+	c := v8.NewContext(iso)
+	defer c.Close()
+
+	// "a" was kept in both rounds.
+	v, err := c.RunScript("a", "probe_a.js")
+	if err != nil {
+		t.Fatalf("probe a: %v", err)
+	}
+	if v.Integer() != 1 {
+		t.Fatalf("a = %d, want 1", v.Integer())
+	}
+
+	// "c" was kept in the second round.
+	v2, err := c.RunScript("c", "probe_c.js")
+	if err != nil {
+		t.Fatalf("probe c: %v", err)
+	}
+	if v2.Integer() != 3 {
+		t.Fatalf("c = %d, want 3", v2.Integer())
+	}
+
+	// "b" was NOT kept in the second round — should be undefined.
+	v3, err := c.RunScript("typeof b", "probe_b.js")
+	if err != nil {
+		t.Fatalf("probe b: %v", err)
+	}
+	if v3.String() != "undefined" {
+		t.Fatalf("typeof b = %s, want undefined", v3.String())
+	}
+}
+
+// TestFreshContext_AfterCreateBlob verifies that FreshContext returns
+// ErrSnapshotCreatorConsumed when called after CreateBlob.
+func TestFreshContext_AfterCreateBlob(t *testing.T) {
+	sc := v8.NewSnapshotCreator()
+	_ = sc.Context()
+
+	blob, err := sc.CreateBlob(v8.FunctionCodeKeep)
+	if err != nil {
+		sc.Dispose()
+		t.Fatalf("CreateBlob: %v", err)
+	}
+	_ = blob
+
+	err = sc.FreshContext([]string{"x"})
+	if !errors.Is(err, v8.ErrSnapshotCreatorConsumed) {
+		t.Fatalf("FreshContext after CreateBlob: err = %v, want ErrSnapshotCreatorConsumed", err)
+	}
+	sc.Dispose()
+}
+
+// TestFreshContext_NonexistentProperty verifies that requesting a property
+// name that doesn't exist on the old global does not crash and produces a
+// valid snapshot where the property is undefined.
+func TestFreshContext_NonexistentProperty(t *testing.T) {
+	sc := v8.NewSnapshotCreator()
+	ctx := sc.Context()
+
+	if _, err := ctx.RunScript("globalThis.real = 99;", "setup.js"); err != nil {
+		sc.Dispose()
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := sc.FreshContext([]string{"real", "nonexistent"}); err != nil {
+		sc.Dispose()
+		t.Fatalf("FreshContext: %v", err)
+	}
+
+	blob, err := sc.CreateBlob(v8.FunctionCodeKeep)
+	sc.Dispose()
+	if err != nil {
+		t.Fatalf("CreateBlob: %v", err)
+	}
+
+	iso := v8.NewIsolate(v8.WithSnapshotBlob(blob))
+	defer iso.Dispose()
+
+	c := v8.NewContext(iso)
+	defer c.Close()
+
+	v, err := c.RunScript("real", "probe_real.js")
+	if err != nil {
+		t.Fatalf("probe real: %v", err)
+	}
+	if v.Integer() != 99 {
+		t.Fatalf("real = %d, want 99", v.Integer())
+	}
+
+	v2, err := c.RunScript("typeof nonexistent", "probe_missing.js")
+	if err != nil {
+		t.Fatalf("probe nonexistent: %v", err)
+	}
+	if v2.String() != "undefined" {
+		t.Fatalf("typeof nonexistent = %s, want undefined", v2.String())
+	}
+}
+
+// TestFreshContext_DuplicateKeepNames verifies that duplicate names in the
+// keep list do not crash and the property is preserved correctly.
+func TestFreshContext_DuplicateKeepNames(t *testing.T) {
+	sc := v8.NewSnapshotCreator()
+	ctx := sc.Context()
+
+	if _, err := ctx.RunScript("globalThis.dup = 'hello';", "setup.js"); err != nil {
+		sc.Dispose()
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := sc.FreshContext([]string{"dup", "dup", "dup"}); err != nil {
+		sc.Dispose()
+		t.Fatalf("FreshContext: %v", err)
+	}
+
+	blob, err := sc.CreateBlob(v8.FunctionCodeKeep)
+	sc.Dispose()
+	if err != nil {
+		t.Fatalf("CreateBlob: %v", err)
+	}
+
+	iso := v8.NewIsolate(v8.WithSnapshotBlob(blob))
+	defer iso.Dispose()
+
+	c := v8.NewContext(iso)
+	defer c.Close()
+
+	v, err := c.RunScript("dup", "probe.js")
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if v.String() != "hello" {
+		t.Fatalf("dup = %s, want 'hello'", v.String())
+	}
+}
+
+// TestFreshContext_RunScriptAfterFresh verifies that RunScript works on the
+// new context returned by FreshContext and that values are tracked correctly
+// for CreateBlob.
+func TestFreshContext_RunScriptAfterFresh(t *testing.T) {
+	sc := v8.NewSnapshotCreator()
+	ctx := sc.Context()
+
+	if _, err := ctx.RunScript("globalThis.ns = {v: 1};", "setup.js"); err != nil {
+		sc.Dispose()
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := sc.FreshContext([]string{"ns"}); err != nil {
+		sc.Dispose()
+		t.Fatalf("FreshContext: %v", err)
+	}
+
+	freshCtx := sc.Context()
+	if _, err := freshCtx.RunScript("globalThis.added = ns.v + 100;", "post.js"); err != nil {
+		sc.Dispose()
+		t.Fatalf("post-FreshContext RunScript: %v", err)
+	}
+
+	blob, err := sc.CreateBlob(v8.FunctionCodeKeep)
+	sc.Dispose()
+	if err != nil {
+		t.Fatalf("CreateBlob: %v", err)
+	}
+
+	iso := v8.NewIsolate(v8.WithSnapshotBlob(blob))
+	defer iso.Dispose()
+
+	c := v8.NewContext(iso)
+	defer c.Close()
+
+	v, err := c.RunScript("added", "probe.js")
+	if err != nil {
+		t.Fatalf("probe added: %v", err)
+	}
+	if v.Integer() != 101 {
+		t.Fatalf("added = %d, want 101", v.Integer())
+	}
+}
+
+// TestFreshContext_DeterminismShimPreserved verifies that the determinism
+// shim is automatically reinstalled on the fresh context when
+// WithDeterministicTime was set.
+func TestFreshContext_DeterminismShimPreserved(t *testing.T) {
+	seed := int64(1_700_000_000_000)
+	sc := v8.NewSnapshotCreator(v8.WithDeterministicTime(seed))
+	ctx := sc.Context()
+
+	if _, err := ctx.RunScript("globalThis.ns = {stamp: Date.now()};", "setup.js"); err != nil {
+		sc.Dispose()
+		t.Fatalf("setup: %v", err)
+	}
+
+	if err := sc.FreshContext([]string{"ns"}); err != nil {
+		sc.Dispose()
+		t.Fatalf("FreshContext: %v", err)
+	}
+
+	freshCtx := sc.Context()
+	// Date.now() should return the deterministic seed, not wall-clock time.
+	if _, err := freshCtx.RunScript("globalThis.postFreshStamp = Date.now();", "post.js"); err != nil {
+		sc.Dispose()
+		t.Fatalf("post-FreshContext RunScript: %v", err)
+	}
+
+	blob, err := sc.CreateBlob(v8.FunctionCodeKeep)
+	sc.Dispose()
+	if err != nil {
+		t.Fatalf("CreateBlob: %v", err)
+	}
+
+	iso := v8.NewIsolate(v8.WithSnapshotBlob(blob))
+	defer iso.Dispose()
+
+	c := v8.NewContext(iso)
+	defer c.Close()
+
+	v, err := c.RunScript("postFreshStamp", "probe.js")
+	if err != nil {
+		t.Fatalf("probe postFreshStamp: %v", err)
+	}
+	stamp := v.Integer()
+	// The determinism shim returns values close to the seed (seed + tick/1000).
+	// With real wall-clock time the value would be ~1.7+ trillion (current time).
+	// We check that the stamp is within a reasonable range of the seed.
+	if stamp < seed || stamp > seed+1000 {
+		t.Fatalf("postFreshStamp = %d, want ~%d (determinism shim not active)", stamp, seed)
+	}
+}
+
+// TestFreshContext_BeforeContextCreated verifies that FreshContext returns
+// an error when called before Context() has been invoked.
+func TestFreshContext_BeforeContextCreated(t *testing.T) {
+	sc := v8.NewSnapshotCreator()
+
+	err := sc.FreshContext([]string{"x"})
+	if err == nil {
+		sc.Dispose()
+		t.Fatal("FreshContext before Context() should return an error")
+	}
+	if !strings.Contains(err.Error(), "before Context()") {
+		sc.Dispose()
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sc.Dispose()
 }

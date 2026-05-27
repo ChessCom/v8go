@@ -76,8 +76,8 @@ extern intptr_t v8go_FunctionTemplateCallback_addr(void);
 // from old_ctx into the new context. The fresh context has a clean
 // global object Map (no lingering transitions from deleted properties),
 // which avoids V8 Genesis::InitializeGlobal collisions when the snapshot
-// is deserialized. Returns the new m_ctx; the caller must release the
-// old context's handles before CreateBlob.
+// is deserialized. The old context's tracked handles and values are
+// released internally. Returns the new m_ctx, or nullptr on failure.
 extern ContextPtr SnapshotCreatorFreshContext(SnapshotCreatorPtr p,
                                               ContextPtr old_ctx,
                                               const char** keep_names,

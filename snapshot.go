@@ -258,6 +258,13 @@ func (sc *SnapshotCreator) CreateBlob(fch FunctionCodeHandling) ([]byte, error) 
 // copies the specified properties (typically just "_bf") by reference
 // so the full object graph survives serialization.
 //
+// If WithDeterministicTime was set, the determinism shim is
+// automatically reinstalled on the fresh context.
+//
+// Access to any *Value obtained from the old context after FreshContext
+// is undefined behaviour and may panic or corrupt memory. Callers must
+// not retain references to values from the old context.
+//
 // Must be called after all scripts have executed and before CreateBlob.
 func (sc *SnapshotCreator) FreshContext(keep []string) error {
 	sc.closeMu.Lock()
@@ -308,6 +315,13 @@ func (sc *SnapshotCreator) FreshContext(keep []string) error {
 		iso: sc.iso,
 	}
 	sc.ctx.register()
+
+	if sc.cfg != nil && sc.cfg.deterministicTime {
+		if err := sc.installDeterminismShim(sc.ctx, sc.cfg.seedMillis); err != nil {
+			return fmt.Errorf("v8go: FreshContext: failed to reinstall determinism shim: %w", err)
+		}
+	}
+
 	return nil
 }
 

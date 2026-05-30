@@ -82,6 +82,7 @@ typedef struct {
 } CPUProfile;
 
 extern void Init();
+extern void SetForceRosettaFallback(int enabled);
 
 extern CPUProfiler* NewCPUProfiler(IsolatePtr iso_ptr);
 extern void CPUProfilerDispose(CPUProfiler* ptr);

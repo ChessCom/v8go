@@ -37,3 +37,17 @@ func initializeIfNecessary() {
 }
 
 var v8once sync.Once
+
+// SetForceRosettaFallback forces (or unforces) the Rosetta-safe compile path
+// inside IsolateCompileUnboundScript. When enabled, CompileUnboundScript uses
+// ScriptCompiler::Compile + GetUnboundScript instead of the direct
+// ScriptCompiler::CompileUnboundScript call that crashes under Rosetta 2.
+//
+// This is primarily useful for testing the fallback path on native hardware.
+func SetForceRosettaFallback(enabled bool) {
+	v := C.int(0)
+	if enabled {
+		v = 1
+	}
+	C.SetForceRosettaFallback(v)
+}

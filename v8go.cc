@@ -2,9 +2,14 @@
 
 #include <stdio.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include "utils.h"
+
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 
 #include "context-macros.h"
 #include "function_template.h"
@@ -14,6 +19,36 @@
 #include "value-macros.h"
 
 using namespace v8;
+
+// Rosetta 2 detection: V8's ScriptCompiler::CompileUnboundScript crashes with
+// a null-pointer dereference inside the JIT when an amd64 binary runs under
+// Rosetta on arm64 macOS. Detect this once and cache the result.
+#if defined(__APPLE__) && defined(__x86_64__)
+static bool isRosetta() {
+  static std::atomic<int> cached{-1};
+  int v = cached.load(std::memory_order_relaxed);
+  if (v >= 0) return v;
+  int translated = 0;
+  size_t size = sizeof(translated);
+  if (sysctlbyname("sysctl.proc_translated", &translated, &size, NULL, 0) ==
+      0) {
+    cached.store(translated, std::memory_order_relaxed);
+    return translated;
+  }
+  cached.store(0, std::memory_order_relaxed);
+  return false;
+}
+#else
+static bool isRosetta() {
+  return false;
+}
+#endif
+
+static std::atomic<bool> forceRosettaFallback{false};
+
+static bool useRosettaFallback() {
+  return forceRosettaFallback.load(std::memory_order_relaxed) || isRosetta();
+}
 
 const int ScriptCompilerNoCompileOptions = ScriptCompiler::kNoCompileOptions;
 const int ScriptCompilerConsumeCodeCache = ScriptCompiler::kConsumeCodeCache;
@@ -26,6 +61,10 @@ m_unboundScript* tracked_unbound_script(m_ctx* ctx, m_unboundScript* us) {
 }
 
 extern "C" {
+
+void SetForceRosettaFallback(int enabled) {
+  forceRosettaFallback.store(enabled != 0, std::memory_order_relaxed);
+}
 
 /********** Isolate **********/
 
@@ -64,11 +103,24 @@ RtnUnboundScript IsolateCompileUnboundScript(IsolatePtr iso,
   ScriptCompiler::Source source(src, script_origin, cached_data);
 
   Local<UnboundScript> unbound_script;
-  if (!ScriptCompiler::CompileUnboundScript(iso, &source, option)
-           .ToLocal(&unbound_script)) {
-    rtn.error = ExceptionError(try_catch, iso, local_ctx);
-    return rtn;
-  };
+  if (useRosettaFallback()) {
+    // ScriptCompiler::CompileUnboundScript triggers a SIGSEGV inside V8's JIT
+    // under Rosetta 2.  Use the context-bound ScriptCompiler::Compile instead
+    // and extract the UnboundScript — same bytecode, same semantics.
+    Local<Script> script;
+    if (!ScriptCompiler::Compile(local_ctx, &source, option)
+             .ToLocal(&script)) {
+      rtn.error = ExceptionError(try_catch, iso, local_ctx);
+      return rtn;
+    }
+    unbound_script = script->GetUnboundScript();
+  } else {
+    if (!ScriptCompiler::CompileUnboundScript(iso, &source, option)
+             .ToLocal(&unbound_script)) {
+      rtn.error = ExceptionError(try_catch, iso, local_ctx);
+      return rtn;
+    }
+  }
 
   if (cached_data) {
     rtn.cachedDataRejected = cached_data->rejected;

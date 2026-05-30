@@ -118,6 +118,59 @@ func TestIsolateCompileUnboundScript_CachedDataRejected(t *testing.T) {
 	}
 }
 
+func TestIsolateCompileUnboundScript_RosettaFallback(t *testing.T) {
+	v8.SetForceRosettaFallback(true)
+	defer v8.SetForceRosettaFallback(false)
+
+	s := "function foo() { return 'bar'; }; foo()"
+
+	iso := v8.NewIsolate()
+	defer iso.Dispose()
+
+	us, err := iso.CompileUnboundScript(s, "script.js", v8.CompileOptions{Mode: v8.CompileModeEager})
+	fatalIf(t, err)
+
+	// Run in two different contexts on the same isolate.
+	c1 := v8.NewContext(iso)
+	defer c1.Close()
+	val, err := us.Run(c1)
+	fatalIf(t, err)
+	if val.String() != "bar" {
+		t.Fatalf("expected bar, got %v", val)
+	}
+
+	c2 := v8.NewContext(iso)
+	defer c2.Close()
+	val, err = us.Run(c2)
+	fatalIf(t, err)
+	if val.String() != "bar" {
+		t.Fatalf("expected bar on second context, got %v", val)
+	}
+
+	// Verify code cache round-trip through the fallback path.
+	cachedData := us.CreateCodeCache()
+	if cachedData == nil || len(cachedData.Bytes) == 0 {
+		t.Fatal("expected non-empty code cache from fallback-compiled script")
+	}
+
+	iso2 := v8.NewIsolate()
+	defer iso2.Dispose()
+	c3 := v8.NewContext(iso2)
+	defer c3.Close()
+
+	us2, err := iso2.CompileUnboundScript(s, "script.js", v8.CompileOptions{CachedData: cachedData})
+	fatalIf(t, err)
+	if cachedData.Rejected {
+		t.Fatal("expected code cache from fallback path to be accepted")
+	}
+
+	val, err = us2.Run(c3)
+	fatalIf(t, err)
+	if val.String() != "bar" {
+		t.Fatalf("expected bar from cached fallback script, got %v", val)
+	}
+}
+
 func TestIsolateCompileUnboundScript_InvalidOptions(t *testing.T) {
 	iso := v8.NewIsolate()
 	defer iso.Dispose()
